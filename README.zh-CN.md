@@ -90,6 +90,11 @@ bash skill/scripts/run_robinhood_chain_narrative_radar.sh quick 0x6a98c4145cc8ea
 - `launchpad.pons`：Pons launch tx、LP NFT tokenId、locker owner、locker 源码风险。
 - `nextSearches`：建议继续搜索的 CA、symbol、官网、X 链接。
 
+## 案例说明
+
+- [HoodCard](case-studies/hoodcard.zh-CN.md)：RWA 支付卡产品案例，用代币化股票作为虚拟 Visa 卡消费余额。
+- [Agent Robin](case-studies/agent-robin.zh-CN.md)：AI trading meme 案例，展示真实链上运行与 treasury、LP、分红风险如何同时存在。
+
 ## Agent 推荐工作流
 
 当用户给 CA 时：

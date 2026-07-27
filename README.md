@@ -81,6 +81,11 @@ The probe returns structured JSON with:
 - `launchpad.pons`: Pons launch transaction, tokenId, LP NFT owner, locker contract, and locker risk signals.
 - `nextSearches`: suggested exact web and social searches.
 
+## Case Studies
+
+- [HoodCard](case-studies/hoodcard.zh-CN.md): a Robinhood Chain RWA payment-card product that turns tokenized stocks into virtual Visa card spending power.
+- [Agent Robin](case-studies/agent-robin.zh-CN.md): an AI trading meme case showing how real on-chain activity can coexist with treasury, LP, and profit-share risks.
+
 ## Suggested Agent Workflow
 
 When a user gives a CA:
