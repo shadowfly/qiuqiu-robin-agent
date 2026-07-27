@@ -1,134 +1,230 @@
-# Qiuqiu Robin Agent
+# 🏹 Qiuqiu Robin Agent
 
-Qiuqiu Robin Agent is a CA-first research skill for Robinhood Chain tokens. It helps an AI agent quickly inspect a token contract address, collect market and social evidence, check DexScreener paid profile status, review Blockscout contract data, identify launchpad and LP-lock evidence, and classify the token's Robinhood Chain narrative.
+> Robinhood Chain 农民的 CA 快筛 Skill：先查 Dex，再查合约，再查 LP，再查社媒，最后才谈叙事。
 
-It is designed for fast due diligence, not trading execution.
+[English Version](docs/README.en.md) · [HoodCard 案例](case-studies/hoodcard.zh-CN.md) · [Agent Robin 案例](case-studies/agent-robin.zh-CN.md)
 
-## What It Does
+---
 
-- Detects Robinhood Chain token pairs on DexScreener.
-- Checks market cap, liquidity, volume, buy/sell activity, pair age, and official Dex profile links.
-- Checks DexScreener paid orders, including approved token profiles and boosts.
-- Reads Blockscout token metadata, holder counters, verified source, and decoded constructor arguments.
-- Performs a heuristic contract-risk scan for mint, owner/admin controls, blacklist, pause, tax/fee logic, sell restrictions, and arbitrary-call surfaces.
-- Detects Pons Launchpad-style launches when available.
-- Extracts launch transaction, pool address, LP NFT tokenId, locker owner, fee redirect, and locker source-code risk signals.
-- Guides social and narrative checks across X/Twitter, websites, Telegram, docs, and exact CA searches.
-- Classifies Robinhood Chain narratives such as native meme, RWA/stock token, AI agent, launchpad infrastructure, DeFi/trading, wallet consumer, and ticker-noise projects.
+## 🌱 这是干什么的？
 
-## Why Robinhood Chain Needs A Dedicated Lens
+Qiuqiu Robin Agent 是一个面向 **Robinhood Chain** 的 CA 快筛与叙事判断工具。
 
-Robinhood Chain is not a generic meme chain. Its early ecosystem combines:
+你给它一个 token CA，它会帮你做第一轮脏活：
 
-- Robinhood-native memes and cultural references such as Cash Cat, HOOD, ROBIN, VLAD, 4663, Dog in Hood, and Lady Marian.
-- RWA and stock-token narratives connected to tokenized equities and brokerage-style liquidity.
-- AI-agent projects that claim live trading, treasury management, or autonomous agent behavior.
-- Launchpad-driven token waves from platforms such as NOXA, Pons, flap, trensh, and bankr.
-- High-speed copycats, paid Dex profiles, thin liquidity, and fake official-brand claims.
+- 这个币到底是不是在 Robinhood Chain 上交易？
+- DexScreener 资料是不是付费的？
+- 官网、X、Telegram 是否真的认领 CA？
+- 合约有没有 mint / owner / blacklist / tax / pause / sell limit？
+- 如果是 Pons 发射，LP NFT 到底有没有进 locker？
+- 这是 Robinhood 本体梗、RWA、AI Agent，还是普通 ticker 噪音？
 
-This skill separates narrative excitement from verifiable evidence.
+它不是交易机器人，也不是护身符。
 
-## Repository Structure
+**它只是帮你在开赌前，先把坑照出来。**
+
+---
+
+## 🧭 工作流线稿
 
 ```text
-qiuqiu-robin-agent/
-├── README.md
-├── README.zh-CN.md
-└── skill/
-    ├── SKILL.md
-    ├── agents/
-    │   └── openai.yaml
-    ├── references/
-    │   ├── ca-screening-playbook.md
-    │   ├── robinhood-chain-ecosystem-timeline.md
-    │   └── robinhood-chain-narrative-rubric.md
-    └── scripts/
-        ├── robinhood_ca_probe.mjs
-        └── run_robinhood_chain_narrative_radar.sh
+         给一个 CA
+             |
+             v
+   +-------------------+
+   |  DexScreener 快查 |
+   |  池子 / 付费 / 量 |
+   +-------------------+
+             |
+             v
+   +-------------------+
+   |  Blockscout 合约  |
+   |  源码 / holders   |
+   +-------------------+
+             |
+             v
+   +-------------------+
+   |  Launchpad / LP   |
+   |  tokenId / locker |
+   +-------------------+
+             |
+             v
+   +-------------------+
+   |  社媒与叙事判断   |
+   |  X / 官网 / CA    |
+   +-------------------+
+             |
+             v
+      watch / weak_watch / avoid
 ```
 
-## Quick Start
+---
 
-Run the probe directly:
+## ⚡ 核心能力
+
+### 1. Dex 快速验真
+
+- 检查 CA 是否真的有 Robinhood Chain 主池。
+- 拉取价格、市值、流动性、成交量、买卖 tx、pair 创建时间。
+- 检查 DexScreener 是否付费：
+  - tokenProfile 是否 `approved`
+  - 是否有 boost
+  - 是否只有营销资料，没有链上证据
+
+### 2. 合约风险初筛
+
+读取 Blockscout verified source 和构造参数，扫描：
+
+- mint / 增发
+- owner / admin 权限
+- blacklist / blocklist
+- pause / 停止交易
+- tax / fee 逻辑
+- maxTx / maxWallet / sell restriction
+- arbitrary call / delegatecall 风险
+
+> 注意：这是启发式扫描，不是审计报告。合约 verified 不等于安全。
+
+### 3. Pons / Launchpad / LP 证据
+
+如果项目像 Pons Launchpad 发射，工具会尽量提取：
+
+- launch transaction
+- pool address
+- LP NFT tokenId
+- LP NFT 当前 owner
+- locker 合约是否 verified
+- locker 源码里有没有 withdraw / unlock / decreaseLiquidity / arbitrary-call 表面
+
+这一步非常关键。
+
+**不能因为平台支持锁仓，就默认某个 token 的 LP 已锁。必须 token-specific 验证。**
+
+### 4. 社媒与叙事判断
+
+工具会引导 agent 搜索：
+
+- exact CA
+- Dex profile 里的官网 / X / Telegram
+- X bio / launch thread 是否认领 CA
+- 官网是否反链 X
+- 项目是不是借 Robinhood 官方名字蹭热度
+- 是否有真实产品、API、dashboard、docs，还是只有 landing page
+
+---
+
+## 🧩 Robinhood Chain 叙事分类
+
+这个 skill 会按 Robinhood Chain 的语境分类，而不是用普通土狗链逻辑一刀切。
+
+| Bucket | 说明 |
+|---|---|
+| `robinhood_native_meme` | Cash Cat、HOOD、VLAD、4663、Dog in Hood、Lady Marian 等本体梗 |
+| `stock_token_rwa` | tokenized stocks、RWA、抵押股票借稳定币、券商式流动性 |
+| `ai_agent` | AI trading agent、Virtuals-style agent、自动 treasury / 自动交易 |
+| `launchpad_infra` | NOXA、Pons、flap、trensh、bankr、token factory |
+| `trading_defi` | DEX、perps、lending、vault、market making |
+| `meme_ticker` | 只借 HOOD / 股票 ticker / Robinhood 名字的噪音盘 |
+| `unknown_or_noise` | 只有价格页，没有项目证据 |
+
+---
+
+## 🧪 快速使用
+
+直接运行 CA probe：
 
 ```bash
 node skill/scripts/robinhood_ca_probe.mjs <ROBINHOOD_CHAIN_TOKEN_CA>
 ```
 
-Or run the skill helper:
+或者运行 helper：
 
 ```bash
 bash skill/scripts/run_robinhood_chain_narrative_radar.sh quick <ROBINHOOD_CHAIN_TOKEN_CA>
 ```
 
-Example:
+示例：
 
 ```bash
 bash skill/scripts/run_robinhood_chain_narrative_radar.sh quick 0x6a98c4145cc8ea5a779118a31308929e5dda8a1a
 ```
 
-The script outputs JSON first, then a manual evidence checklist.
+脚本会先输出 JSON，再输出人工复核 checklist。
 
-## Output Highlights
+---
 
-The probe returns structured JSON with:
+## 📦 JSON 输出重点
 
-- `dex.mainPair`: pair URL, price, FDV, market cap, liquidity, volume, buy/sell transactions, pair creation time, websites, socials.
-- `dex.paid`: DexScreener tokenProfile order status and boost data.
-- `blockscout.token`: token name, symbol, holders, supply, and metadata.
-- `blockscout.contract`: verified source status and decoded constructor arguments.
-- `contractRisk.heuristicFlags`: source-code risk keywords.
-- `launchpad.pons`: Pons launch transaction, tokenId, LP NFT owner, locker contract, and locker risk signals.
-- `nextSearches`: suggested exact web and social searches.
+- `dex.mainPair`：主池、价格、市值、流动性、成交、买卖 tx、创建时间、官网和社媒。
+- `dex.paid`：DexScreener tokenProfile 是否付费 approved、是否有 boost。
+- `blockscout.token`：token 名称、symbol、holders、总供应量。
+- `blockscout.contract`：源码是否 verified、构造参数。
+- `contractRisk.heuristicFlags`：合约风险关键词。
+- `launchpad.pons`：Pons launch tx、LP NFT tokenId、locker owner、locker 源码风险。
+- `nextSearches`：建议继续搜索的 CA、symbol、官网、X 链接。
 
-## Case Studies
+---
 
-- [HoodCard](case-studies/hoodcard.zh-CN.md): a Robinhood Chain RWA payment-card product that turns tokenized stocks into virtual Visa card spending power.
-- [Agent Robin](case-studies/agent-robin.zh-CN.md): an AI trading meme case showing how real on-chain activity can coexist with treasury, LP, and profit-share risks.
+## 🧑‍🌾 Agent 推荐工作流
 
-## Suggested Agent Workflow
+当用户给 CA 时：
 
-When a user gives a CA:
+1. 先运行 `robinhood_ca_probe.mjs`。
+2. 确认 DexScreener 主池是 `chainId=robinhood`。
+3. 看 Dex 是否付费 tokenProfile / boost。
+4. 看市场结构：流动性、成交、买卖 tx、pair 年龄。
+5. 看 Blockscout 合约是否 verified，构造参数是否能解释来源。
+6. 人工复核合约风险 flags，不要只凭关键词下安全结论。
+7. 如果是 Pons，查 token-specific LP NFT tokenId、owner、locker 源码。
+8. 搜 exact CA，看官网/X 是否明确认领。
+9. 最后再判断叙事类别和 watch / avoid。
 
-1. Run `robinhood_ca_probe.mjs`.
-2. Verify the Dex pair is on `chainId=robinhood`.
-3. Check DexScreener paid profile and boost status.
-4. Check market structure: liquidity, volume, buy/sell balance, and pair age.
-5. Review Blockscout contract verification and constructor arguments.
-6. Inspect contract-risk flags manually before making safety claims.
-7. If the token uses Pons, verify the token-specific LP NFT owner and locker source.
-8. Search the exact CA on X/web and confirm whether the official website or X account claims the CA.
-9. Classify the narrative and write a concise Chinese-first verdict.
+---
 
-## Verdict Categories
+## 🧷 判断等级
 
-- `strong_watch`: strong evidence, no hard red flags, token-specific LP and official CA recognition are clear.
-- `watch`: credible but incomplete evidence; worth monitoring.
-- `weak_watch`: narrative exists, but proof is thin or risk is high.
-- `avoid`: no real chain evidence, unsupported chain, suspicious contract, unclear sellability, fake official claims, or serious liquidity risk.
+| 等级 | 含义 |
+|---|---|
+| `strong_watch` | 证据强、无硬伤、CA 官方认领清晰、LP 和合约风险都能解释 |
+| `watch` | 项目真实度较高，但还有关键不透明点 |
+| `weak_watch` | 有叙事，但证据薄、风险高 |
+| `avoid` | 链上证据不足、非 Robinhood Chain、合约/LP/卖出存在硬风险、冒用官方或流动性危险 |
 
-## Safety Notes
+---
 
-- DexScreener paid profile or boost is marketing visibility, not proof of legitimacy.
-- A verified contract is not automatically safe.
-- Binance Token Audit currently does not support Robinhood Chain; do not quote a Binance risk label for Robinhood Chain tokens.
-- OKX OnchainOS token/security tools should only be used when the active environment supports Robinhood Chain. If unsupported, fall back to DexScreener and Blockscout.
-- This project does not execute trades and does not provide financial advice.
+## 📚 案例说明
 
-## Installation As A Codex Skill
+- [HoodCard](case-studies/hoodcard.zh-CN.md)：RWA 支付卡产品案例，用代币化股票作为虚拟 Visa 卡消费余额。
+- [Agent Robin](case-studies/agent-robin.zh-CN.md)：AI trading meme 案例，展示真实链上运行与 treasury、LP、分红风险如何同时存在。
 
-Copy the `skill/` directory into a discoverable skills folder:
+---
+
+## 🔧 安装成 Codex Skill
+
+把 `skill/` 目录复制到可发现的 skills 目录：
 
 ```bash
 mkdir -p ~/.codex/skills/qiuqiu-robin-agent
 cp -R skill/* ~/.codex/skills/qiuqiu-robin-agent/
 ```
 
-The callable skill name inside `SKILL.md` is:
+实际触发名：
 
 ```text
 robinhood-chain-narrative-radar
 ```
+
+---
+
+## 🚧 安全边界
+
+- DexScreener 付费 profile / boost 是营销信号，不是可信背书。
+- 合约 verified 不等于安全。
+- Binance Token Audit 当前不支持 Robinhood Chain，不要伪造 Binance 风险标签。
+- OKX OnchainOS 只有在当前环境支持 Robinhood Chain 时才调用；不支持就明确降级到 DexScreener + Blockscout。
+- 本项目不提供投资建议，不自动执行交易。
+
+---
 
 ## License
 
