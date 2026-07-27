@@ -15,6 +15,9 @@ Qiuqiu Robin Agent 是一个面向 Robinhood Chain 的 CA 快筛与叙事判断 
 - 识别 Pons Launchpad 部署痕迹。
 - 自动提取 launch tx、pool、LP NFT tokenId、locker owner、fee redirect、locker 源码风险。
 - 引导 agent 搜索 X/官网/CA/KOL 认领证据。
+- 根据 token 名称、symbol、官网概念和项目文案生成叙事搜索查询。
+- 按 8 个维度给出叙事价值评分：链上真实度、合约/LP、官方认领、叙事原创性、产品证据、社媒传播、市场结构、执行透明度。
+- 输出可复用的客观项目介绍模板，区分“项目方自称”和“外部独立证据”。
 - 按 Robinhood Chain 语境做叙事分类：本体梗、RWA/股票代币、AI Agent、launchpad/infra、DeFi/trading、ticker 噪音等。
 
 ## 为什么需要 Robinhood Chain 专用判断
@@ -88,7 +91,22 @@ bash skill/scripts/run_robinhood_chain_narrative_radar.sh quick 0x6a98c4145cc8ea
 - `blockscout.contract`：源码是否 verified、构造参数。
 - `contractRisk.heuristicFlags`：合约风险关键词。
 - `launchpad.pons`：Pons launch tx、LP NFT tokenId、locker owner、locker 源码风险。
-- `nextSearches`：建议继续搜索的 CA、symbol、官网、X 链接。
+- `narrativeSearch`：按 CA、token name、symbol、官网域名、X handle、RWA/AI/Robinhood 概念生成的搜索查询和证据标签。
+
+## 叙事评分模板
+
+| 维度 | 权重 |
+|---|---:|
+| Chain Reality | 15 |
+| Contract & LP | 15 |
+| Official Claim | 15 |
+| Narrative Originality | 15 |
+| Product Evidence | 15 |
+| Social Traction | 10 |
+| Market Structure | 10 |
+| Execution Transparency | 5 |
+
+完整介绍会包含：项目定位、核心机制、链上证据、社媒与叙事证据、产品证据、合约与 LP 风险、评分表、优势、风险、缺失证据、结论和下一步验证。
 
 ## 案例说明
 

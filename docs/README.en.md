@@ -14,6 +14,9 @@ It is designed for fast due diligence, not trading execution.
 - Detects Pons Launchpad-style launches when available.
 - Extracts launch transaction, pool address, LP NFT tokenId, locker owner, fee redirect, and locker source-code risk signals.
 - Guides social and narrative checks across X/Twitter, websites, Telegram, docs, and exact CA searches.
+- Generates narrative search queries from token name, symbol, website domain, X handle, and concept keywords.
+- Scores narrative value across chain reality, contract/LP, official claim, originality, product evidence, social traction, market structure, and execution transparency.
+- Produces an objective project-summary template that separates project self-claims from independent evidence.
 - Classifies Robinhood Chain narratives such as native meme, RWA/stock token, AI agent, launchpad infrastructure, DeFi/trading, wallet consumer, and ticker-noise projects.
 
 ## Why Robinhood Chain Needs A Dedicated Lens
@@ -60,7 +63,22 @@ The probe returns structured JSON with:
 - `blockscout.contract`: verified source status and decoded constructor arguments.
 - `contractRisk.heuristicFlags`: source-code risk keywords.
 - `launchpad.pons`: Pons launch transaction, tokenId, LP NFT owner, locker contract, and locker risk signals.
-- `nextSearches`: suggested exact web and social searches.
+- `narrativeSearch`: generated web/social searches and evidence labels based on CA, token name, symbol, domain, X handle, and Robinhood/RWA/AI concept terms.
+
+## Narrative Scorecard
+
+| Dimension | Weight |
+|---|---:|
+| Chain Reality | 15 |
+| Contract & LP | 15 |
+| Official Claim | 15 |
+| Narrative Originality | 15 |
+| Product Evidence | 15 |
+| Social Traction | 10 |
+| Market Structure | 10 |
+| Execution Transparency | 5 |
+
+Full reports include project positioning, mechanism, on-chain evidence, social narrative evidence, product evidence, contract and LP risks, score table, strengths, risks, missing evidence, verdict, and next verification steps.
 
 ## Case Studies
 

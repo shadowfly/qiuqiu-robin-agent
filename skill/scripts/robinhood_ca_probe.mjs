@@ -71,6 +71,71 @@ function summarizeOrders(data) {
   };
 }
 
+function hostname(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return null;
+  }
+}
+
+function xHandle(url) {
+  try {
+    const u = new URL(url);
+    if (!/(^|\.)x\.com$|(^|\.)twitter\.com$/.test(u.hostname)) return null;
+    const part = u.pathname.split("/").filter(Boolean)[0];
+    if (!part || ["i", "search", "hashtag"].includes(part)) return null;
+    return part;
+  } catch {
+    return null;
+  }
+}
+
+function unique(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function buildNarrativeSearch({ ca, tokenName, symbol, websites = [], socials = [] }) {
+  const domains = unique(websites.map((w) => hostname(w.url || w)));
+  const handles = unique(socials.map((s) => xHandle(s.url || s)));
+  const cleanSymbol = String(symbol || "").replace(/^\$/, "");
+  const conceptBase = tokenName || cleanSymbol || ca;
+  const queries = [
+    `"${ca}"`,
+    tokenName && `"${tokenName}" "Robinhood Chain"`,
+    cleanSymbol && `"$${cleanSymbol}" "Robinhood Chain"`,
+    cleanSymbol && `"${cleanSymbol}" "Robinhood"`,
+    tokenName && `"${tokenName}" Robinhood meme`,
+    tokenName && `"${tokenName}" token`,
+    tokenName && `"${tokenName}" scam`,
+    cleanSymbol && `"$${cleanSymbol}" crypto`,
+    `${conceptBase} RWA stock token`,
+    `${conceptBase} AI agent Hyperliquid`,
+    `${conceptBase} tokenized stocks`,
+    ...domains.map((d) => `"${d}" "${cleanSymbol || tokenName || ca}"`),
+    ...handles.map((h) => `"${h}" "${ca}"`),
+    ...handles.map((h) => `"${h}" "Robinhood Chain"`),
+    `site:x.com "${ca}"`,
+    cleanSymbol && `site:x.com "$${cleanSymbol}" "Robinhood"`,
+  ];
+  return {
+    tokenName,
+    symbol: cleanSymbol || null,
+    domains,
+    xHandles: handles,
+    queries: unique(queries),
+    evidenceLabels: [
+      "official_self_claim",
+      "independent_ecosystem",
+      "community_social",
+      "same_name_noise",
+      "product_proof",
+      "market_only",
+      "negative_signal",
+    ],
+  };
+}
+
 function decodedParams(log) {
   return Object.fromEntries((log?.decoded?.parameters || []).map((p) => [p.name, p.value]));
 }
@@ -83,10 +148,21 @@ async function probePonsLaunch(ca, contractData, addressData) {
 
   const txsRes = await getJson(API.addressTxs(deployer));
   const txs = txsRes.ok ? txsRes.data?.items || [] : [];
-  const launchTx = txs.find((tx) =>
+  let launchTx = txs.find((tx) =>
     tx?.to?.hash?.toLowerCase() === launchFactory.toLowerCase() &&
     String(tx?.method || "").toLowerCase().includes("launchtoken")
   );
+  const creationTxHash = addressData?.creation_transaction_hash || null;
+  if (!launchTx?.hash && creationTxHash) {
+    const creationTxRes = await getJson(`https://robinhoodchain.blockscout.com/api/v2/transactions/${creationTxHash}`);
+    const creationTx = creationTxRes.ok ? creationTxRes.data : null;
+    if (
+      creationTx?.to?.hash?.toLowerCase() === launchFactory.toLowerCase() &&
+      String(creationTx?.method || "").toLowerCase().includes("launchtoken")
+    ) {
+      launchTx = { hash: creationTxHash };
+    }
+  }
   if (!launchTx?.hash) {
     return { deployer, launchFactory, foundLaunchTx: false };
   }
@@ -163,6 +239,10 @@ async function main() {
   ]);
 
   const mainPair = dexRes.ok ? pickMainPair(dexRes.data?.pairs || []) : null;
+  const tokenName = mainPair?.baseToken?.name || (tokenRes.ok ? tokenRes.data?.name : null);
+  const tokenSymbol = mainPair?.baseToken?.symbol || (tokenRes.ok ? tokenRes.data?.symbol : null);
+  const websites = mainPair?.info?.websites || [];
+  const socials = mainPair?.info?.socials || [];
   const contractData = contractRes.ok ? contractRes.data : null;
   const addressData = addressRes.ok ? addressRes.data : null;
   const pons = contractData ? await probePonsLaunch(CA, contractData, addressData) : null;
@@ -215,12 +295,7 @@ async function main() {
     launchpad: {
       pons,
     },
-    nextSearches: [
-      `"${CA}"`,
-      `"${mainPair?.baseToken?.symbol || ""}" "Robinhood Chain"`,
-      ...(mainPair?.info?.socials || []).map((s) => s.url).filter(Boolean),
-      ...(mainPair?.info?.websites || []).map((w) => w.url).filter(Boolean),
-    ].filter(Boolean),
+    narrativeSearch: buildNarrativeSearch({ ca: CA, tokenName, symbol: tokenSymbol, websites, socials }),
   };
 
   console.log(JSON.stringify(out, null, 2));

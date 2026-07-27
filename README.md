@@ -105,11 +105,37 @@ Qiuqiu Robin Agent 是一个面向 **Robinhood Chain** 的 CA 快筛与叙事判
 工具会引导 agent 搜索：
 
 - exact CA
+- token name + `Robinhood Chain`
+- `$SYMBOL` + `Robinhood`
+- 官网域名 + symbol / CA
 - Dex profile 里的官网 / X / Telegram
 - X bio / launch thread 是否认领 CA
 - 官网是否反链 X
 - 项目是不是借 Robinhood 官方名字蹭热度
 - 是否有真实产品、API、dashboard、docs，还是只有 landing page
+
+### 5. 多维叙事评分
+
+不是只问“故事好不好听”，而是拆成 8 个维度打分：
+
+| 维度 | 权重 | 看什么 |
+|---|---:|---|
+| Chain Reality | 15 | 是否真的有 Robinhood Chain 主池、交易、holders |
+| Contract & LP | 15 | 合约是否 verified、LP NFT 是否 token-specific 锁定 |
+| Official Claim | 15 | 官网/X/docs 是否明确认领 CA，是否互相反链 |
+| Narrative Originality | 15 | 是否有 Robinhood 原生梗、RWA/AI/支付等真实概念来源 |
+| Product Evidence | 15 | 是否有 app/docs/API/GitHub/dashboard/真实钱包动作 |
+| Social Traction | 10 | 是否有自然讨论，而不是纯价格 spam |
+| Market Structure | 10 | 流动性、成交额、买卖 tx、滑点风险是否健康 |
+| Execution Transparency | 5 | treasury、费用、收益分配、agent 行为是否可审计 |
+
+最终输出不是“冲/不冲”，而是：
+
+```text
+strong_watch | watch | weak_watch | avoid
+```
+
+并明确说明：哪些证据是真的，哪些只是项目方自称，哪些证据还缺。
 
 ---
 
@@ -161,7 +187,43 @@ bash skill/scripts/run_robinhood_chain_narrative_radar.sh quick 0x6a98c4145cc8ea
 - `blockscout.contract`：源码是否 verified、构造参数。
 - `contractRisk.heuristicFlags`：合约风险关键词。
 - `launchpad.pons`：Pons launch tx、LP NFT tokenId、locker owner、locker 源码风险。
-- `nextSearches`：建议继续搜索的 CA、symbol、官网、X 链接。
+- `narrativeSearch`：按 CA、token name、symbol、官网域名、X handle、RWA/AI/Robinhood 概念生成的搜索查询和证据标签。
+
+---
+
+## 🧾 客观介绍模板
+
+完整报告会按这个结构输出，方便别的 agent 直接复用：
+
+```text
+{Token}｜Robinhood Chain {Narrative Bucket}
+
+一句话：{什么是真的 + 最大风险是什么}
+
+项目定位：{项目自称是什么}
+核心机制：{token / app / treasury / agent / RWA / launchpad 怎么运作}
+链上证据：{CA、主池、成交、holders、deployer、LP NFT、treasury}
+社媒与叙事证据：{官网/X 是否认领 CA、外部讨论、同名噪音}
+产品证据：{app/docs/GitHub/API/dashboard 是否能闭环}
+合约与 LP 风险：{verified、mint/owner/blacklist/tax/pause/sell-limit、locker}
+
+评分表：
+Chain Reality: x/5
+Contract & LP: x/5
+Official Claim: x/5
+Narrative Originality: x/5
+Product Evidence: x/5
+Social Traction: x/5
+Market Structure: x/5
+Execution Transparency: x/5
+Weighted Score: xx/100
+
+优势：{3-5 条}
+风险：{按严重程度排序}
+缺失证据：{什么证据能改变判断}
+结论：{strong_watch | watch | weak_watch | avoid}
+下一步验证：{1-3 个最关键动作}
+```
 
 ---
 

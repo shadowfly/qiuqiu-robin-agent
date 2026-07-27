@@ -38,7 +38,13 @@ Use this reference when a user gives only a Robinhood Chain CA and wants a fast 
    - Check whether X bio/thread/website lists CA.
    - Note if the account is new, verified, paid, high-follower, or mostly price spam.
 
-7. Optional OKX / other chain skills:
+7. Narrative search:
+   - Use `narrativeSearch.queries` from `robinhood_ca_probe.mjs`.
+   - Search token name, symbol, CA, website domain, X handle, and concept keywords.
+   - Classify each result as official/self-claim, independent source, community discussion, same-name collision, or spam.
+   - Load `narrative-research-template.md` for full scoring and objective summary.
+
+8. Optional OKX / other chain skills:
    - Use OKX token/security/holder tools only when their active chain support includes Robinhood Chain.
    - If unsupported, clearly state fallback and do not quote unsupported scanner results.
    - Binance Token Audit does not support Robinhood Chain.
@@ -57,6 +63,26 @@ LP：tokenId / owner / locker / withdraw surface
 叙事：native meme / RWA / AI agent / launchpad infra / ticker noise
 初判：strong_watch | watch | weak_watch | avoid
 下一步：one concrete verification that changes the verdict
+```
+
+## Full Objective Summary
+
+For a deeper report, use:
+
+```text
+项目定位：
+核心机制：
+链上证据：
+社媒/叙事证据：
+产品证据：
+合约与LP风险：
+市场结构：
+评分表：
+优势：
+风险：
+缺失证据：
+结论：
+下一步验证：
 ```
 
 ## Downgrade Rules

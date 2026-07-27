@@ -168,3 +168,20 @@ Downgrade immediately when:
 - Sell route breaks or transfer restrictions appear.
 - Liquidity is pulled.
 - Website/X disappears or rebrands away from the token.
+
+## Full Narrative Value Score
+
+When the user asks for narrative value, concept quality, whether the name has a meme source, or a full objective summary, use `narrative-research-template.md` instead of only this quick rubric.
+
+The full score must include:
+
+- Chain Reality
+- Contract & LP
+- Official Claim
+- Narrative Originality
+- Product Evidence
+- Social Traction
+- Market Structure
+- Execution Transparency
+
+Do not allow a high Narrative Originality score to override hard contract, LP, or official-claim gaps.

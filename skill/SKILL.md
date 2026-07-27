@@ -4,7 +4,8 @@ description: |
   Use when the user wants to analyze a Robinhood Chain token CA fast: social links and X/Twitter presence, DexScreener
   paid profile/boost/orders, market cap/liquidity/volume, contract safety, launchpad/Pons/NOXA/flap/trensh/bankr origin,
   LP NFT locker status, holder concentration, meme/RWA/AI-agent narrative, or whether a Robinhood Chain token/project is
-  real, fake, honeypot-like, paid-promoted, or worth watching. Supports CA-first quick screening and deep narrative checks.
+  real, fake, honeypot-like, paid-promoted, or worth watching. Supports CA-first quick screening, web/social narrative
+  research by token name/concept, multi-dimensional scoring, and objective project-summary templates.
   Chinese display name: Robinhood Chain 叙事雷达.
 metadata:
   author: local
@@ -22,6 +23,8 @@ Use this skill for:
 - stock token / RWA / tokenized equity / brokerage / trading infra / DeFi liquidity / wallet distribution 叙事判断
 - 只给 CA 时，自动或半自动发现 DexScreener、Blockscout、官网、X/Twitter、GitHub、Docs、Telegram
 - 判断官网真实性、X 官方认领、GitHub/Docs 是否支撑产品、是否借 Robinhood 名字蹭热度
+- 根据 token 名字、symbol、官网概念和项目文案进行网络搜索，查同名项目、新闻/生态背景、X 讨论、KOL 传播、是否有 Robinhood 原生梗或 RWA/AI 产品价值
+- 用多维度评分输出项目总结：链上真实度、合约/LP、官方认领、叙事原创性、产品证据、社媒传播、市场结构、核心风险
 - 识别新链常见风险：空投转账伪装买入、低流动性假盘、付费 Dex 资料伪装可信、Robinhood 关联误导、RWA 合规叙事空壳、同名 ticker 噪音
 
 Do not use it for:
@@ -54,6 +57,7 @@ When the user gives a CA, default to quick screening:
    - `blockscout`: token metadata, holder count, transfer count, verified source
    - `contractRisk`: source-code heuristic for mint/owner/blacklist/tax/pause/sell-limit
    - `launchpad`: decoded constructor and Pons launch/LP NFT/locker evidence when available
+   - `narrativeSearch`: generated search queries from token name, symbol, CA, websites, and socials
 3. Open official links from Dex profile and search exact CA on X/web:
    - exact CA
    - `$SYMBOL` + `Robinhood Chain`
@@ -61,6 +65,27 @@ When the user gives a CA, default to quick screening:
    - X handle + CA
 4. If safety is the user’s focus, inspect contract source and LP evidence before narrative. If OKX security/token tools support Robinhood Chain in the active environment, use them; otherwise say unsupported and rely on Blockscout/Dex.
 5. Then classify narrative and output verdict.
+
+## Narrative Research Workflow
+
+Use this when the user asks “这个叙事值不值/有没有价值/是不是抄的/有没有同类新闻/名字有什么梗”.
+
+1. Read `references/narrative-research-template.md`.
+2. Use the probe's `narrativeSearch.queries` as the first search batch.
+3. Search by concept, not only CA:
+   - exact token name + `Robinhood Chain`
+   - symbol cashtag + `Robinhood`
+   - website domain + token symbol
+   - X handle + CA
+   - concept words + `Robinhood stock tokens`, `RWA`, `AI agent`, `Cash Cat`, `NOXA`, `Pons`
+4. Separate evidence into:
+   - official self-claim
+   - independent ecosystem/news mention
+   - community/KOL discussion
+   - same-name collision/noise
+   - product/docs/GitHub proof
+5. Score with the multi-dimensional template. Do not upgrade a project only because the story is clever.
+6. Output the objective project summary template, including missing evidence and next verification.
 
 ## Robinhood Lens
 
@@ -132,6 +157,8 @@ For deep mode, add:
 - CA 与 Robinhood Chain 归属核验
 - 官网/X/GitHub/Docs 证据
 - 同叙事新闻与生态背景
+- 名字/概念来源、Robinhood 原生文化匹配度、同名噪音和 copycat 风险
+- 多维度评分表和扣分项
 - 交易与流动性结构
 - 聪明钱/转账是否可能是空投或激励
 - 合规/赎回/证券映射风险
@@ -142,6 +169,7 @@ For deep mode, add:
 - Read `references/robinhood-chain-narrative-rubric.md` when scoring.
 - Read `references/robinhood-chain-ecosystem-timeline.md` when classifying meme/RWA/AI/launchpad narrative.
 - Read `references/ca-screening-playbook.md` when updating scripts or doing deep safety checks.
+- Read `references/narrative-research-template.md` when doing web/social narrative research or writing a full objective project summary.
 
 ## Commands
 
