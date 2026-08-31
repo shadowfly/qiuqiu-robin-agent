@@ -166,3 +166,86 @@ test("Pons analyzer reports a token still on the curve rather than guessing a lo
   assert.equal(output.lpLockVerification.poolMatch, "dex_pool_not_from_launchpad");
   assert.equal(output.lpLockVerification.claimAllowed, false);
 });
+
+// A hook sits in the swap path of the graduated pool, so these tests pin the property
+// that matters: hook findings are reported, and they never quietly rewrite claimAllowed.
+const hookBlockscout = (hookContract) => ({
+  ...graduationBlockscout({ topicRows: [{ transactionHash: POOL_TX }], addressLogs: async () => ({ ok: true, data: { items: [] } }) }),
+  contract: async (address) =>
+    String(address).toLowerCase() === HOOKS.toLowerCase()
+      ? hookContract
+      : {
+          ok: true,
+          data: { name: "V2LaunchLocker", is_verified: true, source_code: "contract V2LaunchLocker {}", decoded_constructor_args: [] },
+        },
+});
+
+test("Pons analyzer scans the graduated pool's hook for swap-path control", async () => {
+  const output = await runGraduation(
+    hookBlockscout({
+      ok: true,
+      data: {
+        name: "V2MemeHook",
+        is_verified: true,
+        source_code: `contract V2MemeHook is Ownable {
+          function setSwapGate(bool open) external onlyOwner { tradingEnabled = open; }
+          function beforeSwap(address, PoolKey calldata, SwapParams calldata, bytes calldata) external {
+            require(tradingEnabled, "not open");
+            if (blacklist[tx.origin]) revert NotAllowed();
+          }
+        }`,
+        decoded_constructor_args: [],
+      },
+    })
+  );
+
+  const hits = output.hookRisk.keywordHits;
+  assert.equal(output.hookRisk.address, HOOKS);
+  assert.equal(output.hookRisk.scanStatus, "scanned");
+  assert.equal(hits.swap_entrypoint.status, "present", "the beforeSwap entrypoint must be reported");
+  assert.equal(hits.swap_block.status, "present", "a revert gating the swap must be reported");
+  assert.equal(hits.owner_admin.status, "present", "an owner on the hook must be reported");
+  assert.equal(hits.swap_value_skim.status, "absent", "this hook does not re-price or skim the swap");
+  // The position genuinely is locked in the traded pool. A hostile hook is a separate
+  // finding: folding it into claimAllowed would silently redefine what that field means.
+  assert.equal(output.lpLockVerification.claimAllowed, true);
+  assert.match(output.lpLockVerification.swapPathNote, /hookRisk/);
+});
+
+test("Pons analyzer reports an unverified hook as unchecked, not as clean", async () => {
+  const output = await runGraduation(hookBlockscout({ ok: true, data: { name: null, is_verified: false } }));
+
+  assert.equal(output.hookRisk.scanStatus, "unknown_no_source");
+  assert.equal(output.hookRisk.isVerified, false);
+  // Every check reports unknown, never absent: nothing was read, so nothing is cleared.
+  const statuses = new Set(Object.values(output.hookRisk.keywordHits).map((hit) => hit.status));
+  assert.deepEqual([...statuses], ["unknown"]);
+  assert.match(output.hookRisk.note, /not a clean result/);
+});
+
+test("Pons analyzer marks a direct-LP launch as having no hook to scan", async () => {
+  const blockscout = {
+    transactionLogs: async () => ({
+      ok: true,
+      data: {
+        items: [
+          event("TokenLaunched", { token: CA, positionId: "7", positionManager: POSITION_MANAGER, pool: POOL }),
+          event("PositionLocked", { token: CA, positionId: "7", positionManager: POSITION_MANAGER, pool: POOL }),
+        ],
+      },
+    }),
+    nftInstance: async () => ({ ok: true, data: { owner: { hash: LOCKER, name: "Pons Locker", is_verified: true } } }),
+    contract: async () => ({ ok: true, data: { name: "PermanentLocker", is_verified: true, source_code: "contract PermanentLocker {}", decoded_constructor_args: [] } }),
+    stats: async () => ({ ok: true, data: { total_blocks: 200 } }),
+  };
+  const sanitizer = createSanitizer();
+  const output = await createPonsAnalyzer({ blockscout, sanitizeText: sanitizer.sanitizeText }).probe(
+    CA,
+    { decoded_constructor_args: [[DEPLOYER, { name: "deployer_" }]] },
+    { creator_address_hash: FACTORY, creation_transaction_hash: "0xlaunch" },
+    { pairAddress: POOL, dexId: "uniswap", labels: ["v3"] }
+  );
+
+  assert.equal(output.hookRisk.scanStatus, "no_hook");
+  assert.equal(output.hookRisk.address, null);
+});

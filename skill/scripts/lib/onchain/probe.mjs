@@ -5,6 +5,7 @@ import { createOnchainLiquidityProbe, infrastructureAddresses, summarizeHolders 
 import { createJsonClient, sourceStatus } from "./http-client.mjs";
 import { buildNarrativeSearch, hostname, xHandle } from "./narrative.mjs";
 import { createPonsAnalyzer } from "./pons.mjs";
+import { createQuoteTokenAnalyzer } from "./quote-token.mjs";
 import { createBlockscoutProvider, createDexScreenerProvider } from "./providers.mjs";
 import { createSanitizer } from "./sanitize.mjs";
 
@@ -20,6 +21,7 @@ export function createRobinhoodCaProbe({ http, dexProvider, blockscoutProvider, 
     const dexAnalyzer = createDexAnalyzer({ sanitizeText, sanitizeUrl });
     const ponsAnalyzer = createPonsAnalyzer({ blockscout, sanitizeText });
     const probeOnchainLiquidity = createOnchainLiquidityProbe({ blockscout, sanitizeText });
+    const quoteTokenAnalyzer = createQuoteTokenAnalyzer({ blockscout, sanitizeText });
 
     const [dexResult, ordersResult, tokenResult, countersResult, contractResult, addressResult] = await Promise.all([
       dexSource.tokenPairs(ca),
@@ -73,6 +75,14 @@ export function createRobinhoodCaProbe({ http, dexProvider, blockscoutProvider, 
     const onchainLiquidity = fallbackTarget
       ? await probeOnchainLiquidity(fallbackTarget.address, fallbackTarget.role, ca, pons?.tokenLaunched?.pairToken)
       : null;
+
+    // priceUsd, fdv and marketCap are all denominated in whatever the pool is paired
+    // against, so a claim about the token's valuation is only as good as the identity of
+    // that asset. The graduation event is the fallback because it names the quote token
+    // even when DexScreener has not indexed the pool yet.
+    const quoteToken = await quoteTokenAnalyzer.resolve(
+      mainPair?.quoteToken?.address || pons?.graduation?.quoteToken || pons?.tokenLaunched?.pairToken || null
+    );
 
     const sources = {
       dexToken: sourceStatus(dexResult),
@@ -135,6 +145,9 @@ export function createRobinhoodCaProbe({ http, dexProvider, blockscoutProvider, 
         unrelatedPairsDropped: pairScreen?.unrelatedPairsDropped ?? null,
         crossChainPairs: pairScreen?.crossChainPairs ?? null,
         sideNote: pairScreen?.sideNote ?? null,
+        quoteToken,
+        quoteTokenNote:
+          "The asset the main pool prices this token against. priceReference=floating_asset means priceUsd, fdv and marketCap move with it, so quote them as denominated figures rather than as the token's own value. quoteRisks are reasons to distrust the quoted valuation; they are not findings about this token's contract.",
         onchainLiquidity,
         onchainLiquidityNote:
           "Present only when DexScreener showed no pair with this CA as the base token. It is a fallback picture of what is parked on chain, not a market.",

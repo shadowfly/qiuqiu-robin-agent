@@ -12,7 +12,8 @@ lib/onchain/probe.mjs             application orchestration
         +-- providers.mjs         DexScreener / Blockscout adapters
         +-- http-client.mjs       timeout, retry, transport errors
         +-- dexscreener.mjs       pair screening and aggregation
-        +-- contract-risk.mjs     verified-source scan
+        +-- contract-risk.mjs     verified-source scan (token and v4 hook)
+        +-- quote-token.mjs       identity of the asset the pool prices against
         +-- pons.mjs              launch, graduation and LP evidence
         +-- holders.mjs           role-aware concentration and balances
         +-- narrative.mjs         safe research-query generation

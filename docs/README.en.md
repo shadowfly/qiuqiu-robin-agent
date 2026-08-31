@@ -78,10 +78,12 @@ The probe returns structured JSON with:
 - `dex.aggregate`: liquidity, 24h volume, buy/sell transactions and earliest pair creation summed across every screened pool. Prefer it over `mainPair` when liquidity is split across many pools.
 - `dex.anomalousPairs`: pools dropped before ranking, with the reason (no usable price, no fdv/marketCap, or a price more than 10x off the median).
 - `dex.mainPairScreening`: `clean`, `screened_outliers`, or `fallback_all_pairs_anomalous` - the last means nothing passed and `mainPair`'s numbers are unreliable.
+- `dex.quoteToken`: identity of the asset the main pool prices against (symbol, holders, verification). `priceReference: floating_asset` means `priceUsd`, `fdv` and `marketCap` move with it and must be quoted as denominated figures. `quoteRisks` are reasons to distrust the quoted valuation, not findings about this token's contract.
 - `dex.paid`: DexScreener tokenProfile order status and boost data.
 - `blockscout.token`: token name, symbol, holders, supply, and metadata.
 - `blockscout.contract`: verified source status and decoded constructor arguments.
 - `contractRisk.heuristicFlags`: source-code risk keywords.
+- `launchpad.pons.hookRisk`: keyword scan of the Uniswap v4 hook on the graduated pool. The hook runs inside every swap, so it can refuse or re-price a sell even when `claimAllowed` is `true` — custody of the position and sellability are different questions. `scanStatus: unknown_no_source` means the hook is unverified and nothing was checked, which is a red flag rather than a clean result; `no_hook` means this launch has none (a V1 direct-LP launch). A launchpad ships one shared hook for all its tokens, so a hit here is usually a property of the launchpad, not of this token.
 - `launchpad.pons`: Pons launch transaction, tokenId, LP NFT owner, locker contract, and locker risk signals.
 - `launchpad.pons.graduation`: graduation status, poolId, positionId, and locked amounts. V2 graduation is not atomic, so `poolEvidenceFrom` names the transaction the evidence came from — `pool_graduated_event` (the `PoolGraduated` topic lookup that finds the real pool-creation transaction) or `curve_completed_tx` (older atomic launches). `graduationTx` is that transaction.
 - `narrativeSearch`: generated web/social searches and evidence labels based on CA, token name, symbol, domain, X handle, and Robinhood/RWA/AI concept terms.

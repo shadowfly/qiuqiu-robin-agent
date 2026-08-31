@@ -109,3 +109,73 @@ test("sanitization state is isolated between probe calls", async () => {
   assert.equal(hostile.untrustedEvidence.sanitization.anomalies.length > 0, true);
   assert.deepEqual(clean.untrustedEvidence.sanitization.anomalies, []);
 });
+
+const QUOTE = "0x4444444444444444444444444444444444444444";
+
+// The base token's priceUsd, fdv and marketCap are all quoted through the other side of
+// the pool, so these tests pin that the other side is identified rather than assumed.
+function quoteAwareProviders(quote) {
+  const providers = successfulProviders();
+  const base = providers.blockscoutProvider;
+  providers.blockscoutProvider = {
+    ...base,
+    token: async (address) =>
+      String(address).toLowerCase() === QUOTE.toLowerCase()
+        ? { ok: quote.tokenOk !== false, error: "not found", data: { symbol: quote.symbol, name: quote.name, holders_count: quote.holders } }
+        : base.token(address),
+    contract: async (address) =>
+      String(address).toLowerCase() === QUOTE.toLowerCase()
+        ? { ok: true, data: { name: quote.name, is_verified: quote.isVerified } }
+        : base.contract(address),
+  };
+  return providers;
+}
+
+test("probe reports a stablecoin quote side as a stable price reference", async () => {
+  const probe = createRobinhoodCaProbe({
+    ...quoteAwareProviders({ symbol: "USDG", name: "Global Dollar", holders: 90000, isVerified: true }),
+    now: () => 0,
+  });
+  const output = await probe.probe(CA);
+
+  assert.equal(output.dex.quoteToken.address, QUOTE);
+  assert.equal(output.dex.quoteToken.status, "resolved");
+  assert.equal(output.dex.quoteToken.isStablecoin, true);
+  assert.equal(output.dex.quoteToken.priceReference, "stablecoin");
+  assert.deepEqual(output.dex.quoteToken.quoteRisks, []);
+});
+
+test("probe flags a floating, unverified, thinly held quote side", async () => {
+  const probe = createRobinhoodCaProbe({
+    ...quoteAwareProviders({ symbol: "SPY", name: "SPY Stock Token", holders: 12, isVerified: false }),
+    now: () => 0,
+  });
+  const output = await probe.probe(CA);
+
+  assert.equal(output.dex.quoteToken.priceReference, "floating_asset");
+  assert.deepEqual(output.dex.quoteToken.quoteRisks, [
+    "price_denominated_in_floating_asset",
+    "quote_token_source_unverified",
+    "quote_token_thinly_held",
+  ]);
+});
+
+test("probe never guesses a price reference when the quote side cannot be read", async () => {
+  const probe = createRobinhoodCaProbe({
+    ...quoteAwareProviders({ tokenOk: false, symbol: "USDG", holders: 90000, isVerified: true }),
+    now: () => 0,
+  });
+  const output = await probe.probe(CA);
+
+  assert.equal(output.dex.quoteToken.status, "unknown_lookup_failed");
+  assert.equal(output.dex.quoteToken.priceReference, undefined);
+});
+
+test("probe reports no quote token rather than an empty one when there is no pool", async () => {
+  const providers = successfulProviders();
+  providers.dexProvider.tokenPairs = async () => ({ ok: true, data: { pairs: [] } });
+  const output = await createRobinhoodCaProbe({ ...providers, now: () => 0 }).probe(CA);
+
+  assert.equal(output.dex.quoteToken.status, "unknown_no_quote_token");
+  assert.equal(output.dex.quoteToken.address, null);
+});

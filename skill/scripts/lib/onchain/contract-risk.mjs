@@ -139,6 +139,63 @@ export function keywordHits(scope, sanitizeText, checks = RISK_CHECKS) {
   return output;
 }
 
+// A Uniswap v4 hook runs inside every swap on its pool, so it can refuse a trade,
+// re-price it, or skim value out of it. That is a different question from whether the
+// LP is locked: a perfectly locked position on a pool with a hostile hook is still a
+// honeypot, which is why this is scanned and reported separately from the token.
+const check = (name) => RISK_CHECKS.find((entry) => entry[0] === name);
+
+const HOOK_RISK_CHECKS = [
+  [
+    "swap_entrypoint",
+    /function\s+_?(?:before|after)Swap\s*\(/,
+    "The hook executes on every swap in this pool. Presence is normal for a launchpad hook and is not itself a finding: it is the reason the checks below matter.",
+  ],
+  [
+    "swap_block",
+    // Deliberately narrow. Every hook is full of unrelated reverts -- NotFactory,
+    // UnknownPool, OwnershipCannotBeRenounced -- and matching bare `revert` turns this
+    // check into noise that gets repeated as "the hook can block sells". Only gates that
+    // name trading itself count.
+    /\b(?:tradingEnabled|tradingOpen|swapEnabled|swapsEnabled|swappingEnabled|tradingActive|isTradingOpen)\b|revert\s+\w*(?:Swap|Trad|Transfer)\w*(?:Disabled|Blocked|NotAllowed|NotOpen|Paused|Closed|Forbidden|Restricted)\w*|\b(?:whitelist|allowlist)\b/i,
+    "The hook can refuse a swap under some condition. Read the condition before judging it: a launch-window guard that expires at a fixed block is normal, an owner-controlled switch is not. This check only matches gates that name trading, so absent means no such gate was found -- it does not mean the hook has no reverts at all.",
+  ],
+  [
+    "swap_value_skim",
+    /beforeSwapReturnDelta|afterSwapReturnDelta|LPFeeLibrary|OVERRIDE_FEE|DYNAMIC_FEE|setLPFee|lpFeeOverride/i,
+    "The hook can change the fee per swap or take a delta out of the swap amount. This is how a v4 pool charges a tax without the token contract having one.",
+  ],
+  check("owner_admin"),
+  check("blacklist"),
+  check("pause"),
+  check("tax_fee"),
+  check("sell_limit"),
+  check("arbitrary_call"),
+].filter(Boolean);
+
+export function buildHookRisk(hookAddress, contractData, sanitizeText) {
+  if (!hookAddress) {
+    return {
+      address: null,
+      scanStatus: "no_hook",
+      note: "No hook was recorded for this pool. A Uniswap v3 pool has no hooks, and a v4 pool may use the zero address.",
+    };
+  }
+  const source = contractData?.source_code || "";
+  const scope = resolveScanScope(contractData);
+  return {
+    address: hookAddress,
+    name: sanitizeText(contractData?.name, "hookRisk.name", 80),
+    isVerified: contractData ? Boolean(contractData.is_verified) : null,
+    sourceAvailable: Boolean(source),
+    scanStatus: source ? "scanned" : "unknown_no_source",
+    scanScope: { scannedFiles: scope.files.map((file) => file.path), scannedBytes: scope.scannedBytes, unresolvedBases: scope.unresolvedBases },
+    keywordHits: keywordHits(scope, sanitizeText, HOOK_RISK_CHECKS),
+    note:
+      "The hook sits in the swap path of the pool people trade against, so it can block or tax a sell even when the token contract is clean and the LP is permanently locked. scanStatus=unknown_no_source means the hook is unverified and nothing here was checked: that is a red flag on its own, not a clean result. A launchpad ships one shared hook for every token it launches, so a finding here is usually a property of the launchpad rather than of this token -- say which one you mean.",
+  };
+}
+
 export function buildContractRisk(contractData, sanitizeText) {
   const source = contractData?.source_code || "";
   const scope = resolveScanScope(contractData);

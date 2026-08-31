@@ -1,4 +1,4 @@
-import { stripSolidityComments } from "./contract-risk.mjs";
+import { buildHookRisk, stripSolidityComments } from "./contract-risk.mjs";
 import { addressTopic, decodedParams, eventForToken, eventsNamed, findDecodedArg, isAddress, sameId } from "./evm.mjs";
 
 // keccak256("PoolGraduated(address,uint256,uint256,uint256)"), the launch manager's
@@ -295,6 +295,13 @@ export function createPonsAnalyzer({ blockscout, sanitizeText }) {
 
     const { nftOwner, lockerContract, lockerRisk } = await inspectLocker(positionManager, positionId);
 
+    // The hook runs inside every swap on the graduated pool, so it can block or tax a
+    // sell that the token contract itself permits. Scanned separately from the token:
+    // a locked LP says nothing about whether the swap path is open.
+    const hookAddress = graduation?.hooks || null;
+    const hookResult = isAddress(hookAddress) ? await blockscout.contract(hookAddress) : null;
+    const hookRisk = buildHookRisk(hookAddress, hookResult?.ok ? hookResult.data : null, sanitizeText);
+
     const dexPool = mainPair?.pairAddress || null;
     const lockerHoldsNft = Boolean(nftOwner && isAddress(nftOwner.owner)) && lockerContract?.isVerified === true;
     const noWithdrawSurface = lockerRisk ? lockerRisk.hasWithdrawOrUnlock === false : null;
@@ -322,6 +329,8 @@ export function createPonsAnalyzer({ blockscout, sanitizeText }) {
       claimAllowed: poolMatch === "main_pool_lock_verified" && lockerHoldsNft && noWithdrawSurface === true,
       note:
         "Do not write 'LP locked' unless claimAllowed is true. main_pool_lock_verified means the pool the position was locked in is the same pool DexScreener shows as the main pair (on Uniswap v4 both are the 32-byte poolId). different_pool_locked is a red flag: something is locked, but not the pool people trade against. no_pool_yet_still_on_curve means the token has not graduated off the bonding curve, so there is no LP to lock. dex_pool_not_from_launchpad is a red flag: the token is still on the curve, yet DexScreener already lists a pool, so that pool was opened by someone else and carries no launchpad lock at all -- check its liquidity depth before treating any quoted price as real. Any unknown_* means the link was never proven: report LP as unverified, never as safe.",
+      swapPathNote:
+        "claimAllowed answers one question only: is the position locked in the pool people trade against. It does not say the pool is tradable. On Uniswap v4 the hook runs inside every swap and can refuse or tax a sell, so read launchpad.pons.hookRisk before pairing this with any claim about sellability.",
     };
 
     return {
@@ -332,6 +341,7 @@ export function createPonsAnalyzer({ blockscout, sanitizeText }) {
       launchTxFoundVia: launch.via,
       launchModel,
       lpLockVerification,
+      hookRisk,
       restrictionWindow,
       tokenLaunched: launched,
       positionLocked: locked,
