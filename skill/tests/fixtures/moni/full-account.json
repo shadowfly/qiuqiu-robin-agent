@@ -1,0 +1,17 @@
+{
+  "data": {
+    "id": 4242,
+    "username": "RobinResearch",
+    "name": "Robin Research",
+    "description": "Independent Web3 research account",
+    "followers_count": 12500,
+    "tweets_count": 834,
+    "mentions_count": 321,
+    "smart_mentions_count": 47,
+    "smarts_count": 29,
+    "moni_score": 78.5,
+    "smart_tier": 2,
+    "tags": [{ "slug": "research" }, { "slug": "defi" }],
+    "chains": [{ "slug": "robinhood" }]
+  }
+}

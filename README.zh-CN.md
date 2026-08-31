@@ -57,8 +57,15 @@ qiuqiu-robin-agent/
     │   ├── robinhood-chain-ecosystem-timeline.md
     │   └── robinhood-chain-narrative-rubric.md
     └── scripts/
+        ├── lib/onchain/
+        ├── lib/moni/
+        ├── lib/search/
+        ├── moni_discover_probe.mjs
+        ├── moni_discovery_feed.mjs
         ├── robinhood_ca_probe.mjs
-        └── run_robinhood_chain_narrative_radar.sh
+        ├── robinhood_research_bundle.mjs
+        ├── run_robinhood_chain_narrative_radar.sh
+        └── web_research_probe.mjs
 ```
 
 ## 快速使用
@@ -83,18 +90,46 @@ bash skill/scripts/run_robinhood_chain_narrative_radar.sh quick 0x6a98c4145cc8ea
 
 脚本会先输出 JSON，再输出人工复核 checklist。
 
+链上探针已经拆成薄 CLI、应用编排、数据源 provider 和领域分析器四层。DexScreener/Blockscout 的 URL 与 HTTP 行为不会渗透进 Dex 筛池、合约、Pons/LP 或 holders 判断，现有 CLI 和 JSON 输出保持兼容。
+
+可选接入 Moni Discover 社交情报。Key 只能通过 `MONI_API_KEY` 环境变量提供：
+
+全部环境变量见 [.env.example](.env.example)：复制成 `.env` 后填入。`.env` 已在 `.gitignore` 中，不要提交。
+
+```bash
+node skill/scripts/moni_discover_probe.mjs <X_HANDLE> quick
+node skill/scripts/robinhood_research_bundle.mjs <CA> deep --timeframe D30
+node skill/scripts/moni_discovery_feed.mjs projects --chain robinhood --limit 20
+node skill/scripts/web_research_probe.mjs --deep "Robinhood Chain latest ecosystem"
+```
+
+`quick` 预计 8 points，`deep` 预计 21 points；成功响应默认缓存 15 分钟。Moni 故障不会改变链上探针的完整性或退出码。
+
+全局发现 CLI 支持 `projects`、`events`、`smart-mentions`。这些结果只是候选线索，不能绕过 CA、合约与 LP 验证。
+
+网络研究默认使用 `grok-chat-fast`，Key 从 `GROK_API_KEY` 读取。`deep` Research Bundle 默认搜索，`quick` 可加 `--search`；Grok 失败或没有直接来源 URL 时，会返回 Agent 内置网络搜索回退请求。
+
 ## JSON 输出重点
 
 - `dex.mainPair`：主池、价格、市值、流动性、成交、买卖 tx、创建时间、官网和社媒。已剔除畸形池后取流动性最深的一个。
 - `dex.aggregate`：全部合格池汇总的流动性、24h 成交、买卖 tx、最早建池时间。流动性分散在多个池时以这个为准。
 - `dex.anomalousPairs`：被剔除的池及原因（无可用价格 / 无 fdv / 价格偏离中位数 10 倍以上）。
 - `dex.mainPairScreening`：`clean` | `screened_outliers` | `fallback_all_pairs_anomalous`。最后一种表示没有池通过筛选，mainPair 的数字不可信。
+- `dex.quoteToken`：主池的报价币身份（symbol、holders、是否 verified）。`priceReference=floating_asset` 表示 `priceUsd` / `fdv` / `marketCap` 会跟着报价币一起动，只能作为「以该资产计价」的数字引用。`quoteRisks` 是不信任这个估值的理由，不是对 token 合约本身的判断。
 - `dex.paid`：DexScreener tokenProfile 是否付费 approved、是否有 boost。
 - `blockscout.token`：token 名称、symbol、holders、总供应量。
 - `blockscout.contract`：源码是否 verified、构造参数。
 - `contractRisk.heuristicFlags`：合约风险关键词。
+- `launchpad.pons.hookRisk`：毕业池上的 Uniswap v4 hook 的关键词扫描。hook 在每一笔 swap 里执行，可以拒绝或加价一笔卖出，所以它和 `claimAllowed` 是两个问题：`claimAllowed=true` 只说明仓位被锁住，不代表能卖出。`scanStatus=unknown_no_source` 表示 hook 未开源、什么都没查，这本身是风险信号而不是干净结果；`no_hook` 表示这次发射没有 hook（V1 直接建池）。同一个 launchpad 的所有 token 共用一个 hook，所以这里的命中通常是 launchpad 的属性而不是这个 token 的。
 - `launchpad.pons`：Pons launch tx、LP NFT tokenId、locker owner、locker 源码风险。
+- `launchpad.pons.graduation`：毕业状态、poolId、positionId、锁仓金额。V2 毕业不是原子的，`poolEvidenceFrom` 说明证据取自哪笔交易：`pool_graduated_event`（按 topic 定位到真正建池的那笔）或 `curve_completed_tx`（旧版原子毕业）；`graduationTx` 即该交易。
 - `narrativeSearch`：按 CA、token name、symbol、官网域名、X handle、RWA/AI/Robinhood 概念生成的搜索查询和证据标签。
+- Research Bundle 的 `socialIntelligence`：可选 Moni Score、Smart Tier、提及趋势、Smart Mentions、账户事件及独立覆盖状态。
+- Research Bundle 的 `webResearch`：Grok 搜索结果、直接来源、token usage 和 Agent 内置搜索回退契约。
+
+Moni 的 X handle 默认来自项目方可控的 Dex metadata，必须保持 `identityBinding=unverified`，直到官网、X 或主文档明确认领同一 CA。Moni 热度不能证明官方身份、合约或 LP 安全，也不能补齐缺失的链上证据。
+
+无直接 URL 的 Grok 回答不能作为网络证据。Grok Key 不得进入命令参数、日志、fixture 或提交文件。
 
 ## 叙事评分模板
 

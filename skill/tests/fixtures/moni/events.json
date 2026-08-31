@@ -1,0 +1,14 @@
+{
+  "data": {
+    "items": [
+      {
+        "id": "event-1",
+        "event_type": "NEW_BIO",
+        "created_at": "2026-08-30T09:00:00Z",
+        "title": "Profile update",
+        "description": "Bio changed to mention Robinhood Chain",
+        "url": "https://discover.getmoni.io/events/event-1"
+      }
+    ]
+  }
+}

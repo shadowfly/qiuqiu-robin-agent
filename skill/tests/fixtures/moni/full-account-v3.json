@@ -1,0 +1,11 @@
+{
+  "meta": { "userId": "2082494363481800704", "userUrl": "https://x.com/longbowlend", "accountAgeDays": 32 },
+  "smartEngagement": { "smartsCount": 57, "moniScore": 618, "mentionsCount": 197, "smartMentionsCount": 61 },
+  "smartProfile": {
+    "smartTier": null,
+    "smartTags": [],
+    "projectTags": [{ "slug": "defi", "name": "DeFi" }, { "slug": "rwa", "name": "RWA" }],
+    "chains": [{ "slug": "ethereum", "name": "Ethereum" }],
+    "bioChangesCount": 0
+  }
+}
