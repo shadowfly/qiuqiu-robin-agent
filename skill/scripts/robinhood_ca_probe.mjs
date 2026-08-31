@@ -27,9 +27,109 @@ async function getJson(url) {
   }
 }
 
-function pickMainPair(pairs = []) {
-  const robin = pairs.filter((p) => p.chainId === "robinhood");
-  return robin.sort((a, b) => Number(b?.liquidity?.usd || 0) - Number(a?.liquidity?.usd || 0))[0] || null;
+// DexScreener sometimes reports a pool whose base reserve has collapsed to dust
+// (order 1e-18). Its priceUsd and liquidity.usd then blow up by ~20 orders of
+// magnitude, and ranking on raw liquidity hands that pool back as the main pair,
+// which corrupts every downstream number: price, market cap, liquidity, age.
+// Screen those out before ranking, but keep them in the output - a pool dropped
+// without saying so is its own kind of misleading.
+const PRICE_OUTLIER_RATIO = 10;
+
+const round2 = (n) => Math.round(n * 100) / 100;
+
+function median(values) {
+  if (!values.length) return null;
+  const sorted = values.slice().sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+function pairAnomalyReason(pair, medianPrice) {
+  const price = Number(pair?.priceUsd);
+  if (!Number.isFinite(price) || price <= 0) return "no_usable_price";
+  // DexScreener omits fdv/marketCap exactly when it cannot reconcile a pool's
+  // reserves, so their absence is the cheapest tell for a broken quote.
+  if (pair?.fdv == null && pair?.marketCap == null) return "no_fdv_or_market_cap";
+  if (medianPrice != null && medianPrice > 0) {
+    const ratio = price > medianPrice ? price / medianPrice : medianPrice / price;
+    if (ratio > PRICE_OUTLIER_RATIO) return "price_outlier_vs_median";
+  }
+  return null;
+}
+
+function summarizeAnomalousPair(pair, reason) {
+  return {
+    pairAddress: pair?.pairAddress,
+    dexId: pair?.dexId,
+    reason,
+    priceUsd: pair?.priceUsd ?? null,
+    liquidityUsd: pair?.liquidity?.usd ?? null,
+  };
+}
+
+// Returns the ranked healthy pairs plus the rejects, so the caller can report both.
+function screenPairs(pairs = []) {
+  const robin = pairs.filter((p) => p?.chainId === "robinhood");
+  // Reference price comes only from pairs that carry an FDV: a dust pool reports
+  // none, so it cannot drag the median it is about to be measured against.
+  const referencePrices = robin
+    .filter((p) => p?.fdv != null || p?.marketCap != null)
+    .map((p) => Number(p?.priceUsd))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  const medianPrice = median(referencePrices);
+
+  const healthy = [];
+  const anomalous = [];
+  for (const pair of robin) {
+    const reason = pairAnomalyReason(pair, medianPrice);
+    if (reason) anomalous.push(summarizeAnomalousPair(pair, reason));
+    else healthy.push(pair);
+  }
+  healthy.sort((a, b) => Number(b?.liquidity?.usd || 0) - Number(a?.liquidity?.usd || 0));
+
+  // Every pool screened out: fall back to the old ranking rather than returning
+  // no pair at all, but say so, because the numbers are then untrustworthy.
+  if (!healthy.length && robin.length) {
+    const fallback = robin
+      .slice()
+      .sort((a, b) => Number(b?.liquidity?.usd || 0) - Number(a?.liquidity?.usd || 0))[0];
+    return { mainPair: fallback, healthy: [], anomalous, medianPrice, screening: "fallback_all_pairs_anomalous" };
+  }
+
+  return {
+    mainPair: healthy[0] || null,
+    healthy,
+    anomalous,
+    medianPrice,
+    screening: anomalous.length ? "screened_outliers" : "clean",
+  };
+}
+
+// A single mainPair understates market structure when liquidity is split across
+// many pools, which is the normal case on Robinhood Chain.
+function aggregatePairs(healthy = []) {
+  if (!healthy.length) return null;
+  let liquidityUsd = 0;
+  let volume24h = 0;
+  let buys24h = 0;
+  let sells24h = 0;
+  let earliest = null;
+  for (const p of healthy) {
+    liquidityUsd += Number(p?.liquidity?.usd || 0);
+    volume24h += Number(p?.volume?.h24 || 0);
+    buys24h += Number(p?.txns?.h24?.buys || 0);
+    sells24h += Number(p?.txns?.h24?.sells || 0);
+    const created = Number(p?.pairCreatedAt);
+    if (Number.isFinite(created) && created > 0 && (earliest === null || created < earliest)) earliest = created;
+  }
+  return {
+    pairCount: healthy.length,
+    liquidityUsd: round2(liquidityUsd),
+    volume24h: round2(volume24h),
+    txns24h: { buys: buys24h, sells: sells24h },
+    earliestPairCreatedAt: earliest,
+    earliestPairCreatedAtIso: earliest === null ? null : new Date(earliest).toISOString(),
+  };
 }
 
 function findDecodedArg(args = [], name) {
@@ -238,7 +338,8 @@ async function main() {
     getJson(API.address(CA)),
   ]);
 
-  const mainPair = dexRes.ok ? pickMainPair(dexRes.data?.pairs || []) : null;
+  const pairScreen = dexRes.ok ? screenPairs(dexRes.data?.pairs || []) : null;
+  const mainPair = pairScreen?.mainPair || null;
   const tokenName = mainPair?.baseToken?.name || (tokenRes.ok ? tokenRes.data?.name : null);
   const tokenSymbol = mainPair?.baseToken?.symbol || (tokenRes.ok ? tokenRes.data?.symbol : null);
   const websites = mainPair?.info?.websites || [];
@@ -269,6 +370,15 @@ async function main() {
         websites: mainPair.info?.websites || [],
         socials: mainPair.info?.socials || [],
       } : null,
+      mainPairScreening: pairScreen?.screening ?? null,
+      screeningNote:
+        "mainPair is the deepest pool left after dropping pools with no usable price, no fdv/marketCap, or a price more than " +
+        PRICE_OUTLIER_RATIO +
+        "x off the median. screening=fallback_all_pairs_anomalous means nothing passed and mainPair's numbers are unreliable.",
+      anomalousPairs: pairScreen?.anomalous ?? [],
+      aggregate: aggregatePairs(pairScreen?.healthy || []),
+      aggregateNote:
+        "Summed across screened Robinhood Chain pools. Prefer this over mainPair when liquidity is split across many pools.",
       paid: ordersRes.ok ? summarizeOrders(ordersRes.data) : { ok: false, error: ordersRes.error || ordersRes.status },
     },
     blockscout: {
