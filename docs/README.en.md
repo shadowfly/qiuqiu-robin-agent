@@ -57,7 +57,10 @@ The script outputs JSON first, then a manual evidence checklist.
 
 The probe returns structured JSON with:
 
-- `dex.mainPair`: pair URL, price, FDV, market cap, liquidity, volume, buy/sell transactions, pair creation time, websites, socials.
+- `dex.mainPair`: the deepest pool left after screening, with pair URL, price, FDV, market cap, liquidity, volume, buy/sell transactions, pair creation time, websites, socials.
+- `dex.aggregate`: liquidity, 24h volume, buy/sell transactions and earliest pair creation summed across every screened pool. Prefer it over `mainPair` when liquidity is split across many pools.
+- `dex.anomalousPairs`: pools dropped before ranking, with the reason (no usable price, no fdv/marketCap, or a price more than 10x off the median).
+- `dex.mainPairScreening`: `clean`, `screened_outliers`, or `fallback_all_pairs_anomalous` - the last means nothing passed and `mainPair`'s numbers are unreliable.
 - `dex.paid`: DexScreener tokenProfile order status and boost data.
 - `blockscout.token`: token name, symbol, holders, supply, and metadata.
 - `blockscout.contract`: verified source status and decoded constructor arguments.
