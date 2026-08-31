@@ -1,6 +1,6 @@
 # Web Search Evidence Policy
 
-The search adapter uses the OpenAI-compatible endpoint at `https://ai.taosu.xyz/v1/chat/completions` and defaults to `grok-chat-fast`. The API key is read only from `GROK_API_KEY`; never put it in a command argument, fixture, log, report, or committed file. `GROK_SEARCH_MODEL` may override the model without changing callers, and `GROK_SEARCH_TIMEOUT_MS` the per-attempt timeout (default 90s). The model id is case-sensitive at the gateway. A synthesized, sourced answer normally takes 30-60s; a timeout is not retried, because the model being slow is not a fault a second identical request can fix.
+The search adapter uses an OpenAI-compatible endpoint, `https://ai.taosu.xyz/v1/chat/completions` by default and overridable with `GROK_API_URL`, and defaults to the `grok-chat-fast` model. The API key is read only from `GROK_API_KEY`; never put it in a command argument, fixture, log, report, or committed file. `GROK_SEARCH_MODEL` may override the model without changing callers, and `GROK_SEARCH_TIMEOUT_MS` the per-attempt timeout (default 90s). The model id is case-sensitive at the gateway. A synthesized, sourced answer normally takes 30-60s; a timeout is not retried, because the model being slow is not a fault a second identical request can fix.
 
 ## Provider and Fallback Contract
 

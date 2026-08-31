@@ -44,7 +44,7 @@ function cacheKey(url, body) {
 
 export function createGrokSearchClient({
   apiKey = process.env.GROK_API_KEY,
-  apiUrl = DEFAULT_GROK_API_URL,
+  apiUrl = process.env.GROK_API_URL || DEFAULT_GROK_API_URL,
   model = process.env.GROK_SEARCH_MODEL || DEFAULT_GROK_SEARCH_MODEL,
   fetchImpl = globalThis.fetch,
   // A research call asks for a synthesized, sourced answer: the gateway routinely

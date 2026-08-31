@@ -57,6 +57,8 @@ The on-chain probe is layered as a thin CLI, an application orchestrator, source
 
 Optionally enrich an X account with Moni Discover. Supply the key only through the `MONI_API_KEY` environment variable:
 
+Every environment variable the skill reads is listed in [.env.example](../.env.example). Copy it to `.env` and fill it in; `.env` is gitignored and must never be committed.
+
 ```bash
 node skill/scripts/moni_discover_probe.mjs <X_HANDLE> quick
 node skill/scripts/robinhood_research_bundle.mjs <CA> deep --timeframe D30

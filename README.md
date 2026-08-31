@@ -181,6 +181,8 @@ bash skill/scripts/run_robinhood_chain_narrative_radar.sh quick 0x6a98c4145cc8ea
 
 可选接入 Moni Discover 社交情报（Key 仅通过 `MONI_API_KEY` 环境变量提供）：
 
+全部环境变量见 [.env.example](.env.example)：复制成 `.env` 后填入。`.env` 已在 `.gitignore` 中，不要提交。
+
 ```bash
 node skill/scripts/moni_discover_probe.mjs <X_HANDLE> quick
 node skill/scripts/robinhood_research_bundle.mjs <CA> deep --timeframe D30
