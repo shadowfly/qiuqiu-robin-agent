@@ -12,7 +12,16 @@ const API = {
   addressLogs: (addr) => `https://robinhoodchain.blockscout.com/api/v2/addresses/${addr}/logs`,
   txLogs: (hash) => `https://robinhoodchain.blockscout.com/api/v2/transactions/${hash}/logs`,
   nftInstance: (pm, id) => `https://robinhoodchain.blockscout.com/api/v2/tokens/${pm}/instances/${id}`,
+  holders: (ca) => `https://robinhoodchain.blockscout.com/api/v2/tokens/${ca}/holders`,
+  tokenBalances: (addr) => `https://robinhoodchain.blockscout.com/api/v2/addresses/${addr}/token-balances`,
+  stats: () => "https://robinhoodchain.blockscout.com/api/v2/stats",
 };
+
+// Chain infrastructure that shows up in holder lists and must never be counted
+// as a whale: liquidity parked in a pool is not somebody's position.
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+const DEAD_ADDRESS = "0x000000000000000000000000000000000000dead";
+const V4_POOL_MANAGER = "0x8366a39CC670B4001A1121B8F6A443A643e40951";
 
 function isAddress(value) {
   return /^0x[a-fA-F0-9]{40}$/.test(value);
@@ -180,9 +189,60 @@ function summarizeAnomalousPair(pair, reason) {
   };
 }
 
-// Returns the ranked healthy pairs plus the rejects, so the caller can report both.
-function screenPairs(pairs = []) {
-  const robin = pairs.filter((p) => p?.chainId === "robinhood");
+// Returns the ranked healthy pairs plus every reject, so the caller can report both.
+function screenPairs(pairs = [], ca = "") {
+  const lc = String(ca).toLowerCase();
+  const onChain = pairs.filter((p) => p?.chainId === "robinhood");
+
+  // DexScreener answers a token query with every pair the address appears in, on
+  // either side. In a pair where this CA is the quote asset, priceUsd and fdv
+  // describe the OTHER token, so such a pair must never become mainPair.
+  const sideOf = (p) =>
+    String(p?.baseToken?.address || "").toLowerCase() === lc
+      ? "base"
+      : String(p?.quoteToken?.address || "").toLowerCase() === lc
+        ? "quote"
+        : "unrelated";
+
+  const robin = [];
+  const quoteSide = [];
+  let unrelatedDropped = 0;
+  for (const p of onChain) {
+    const side = lc ? sideOf(p) : "base";
+    if (side === "base") robin.push(p);
+    else if (side === "quote") quoteSide.push(p);
+    else unrelatedDropped += 1;
+  }
+
+  // Same address, different chain. On EVM chains an address collision is not an
+  // accident: it is the same deployer replaying the same bytecode, or a
+  // deliberate look-alike. Either way it is evidence to report, not to price on.
+  const crossChainPairs = pairs
+    .filter((p) => p?.chainId && p.chainId !== "robinhood")
+    .slice(0, 8)
+    .map((p) => ({
+      chainId: p.chainId,
+      dexId: p.dexId,
+      url: sanitizeUrl(p.url, "dex.crossChainPairs.url"),
+      liquidityUsd: p?.liquidity?.usd ?? null,
+      pairCreatedAt: p?.pairCreatedAt ?? null,
+      tokenSide: lc ? sideOf(p) : null,
+    }));
+
+  const sideEvidence = {
+    tokenSide: robin.length ? "base" : quoteSide.length ? "quote_only" : "none",
+    basePairs: robin.length,
+    quoteSidePairs: quoteSide.map((p) => ({
+      pairAddress: p?.pairAddress || null,
+      pricesToken: sanitizeText(p?.baseToken?.symbol, "dex.quoteSidePairs.symbol", 32),
+      liquidityUsd: p?.liquidity?.usd ?? null,
+    })),
+    unrelatedPairsDropped: unrelatedDropped,
+    crossChainPairs,
+    sideNote:
+      "Only pairs where the queried CA is the base token feed mainPair, aggregate and the median. tokenSide=quote_only means every Robinhood Chain pair prices some other token against this one, so this probe has no price for the token itself: do not quote priceUsd, fdv or marketCap. crossChainPairs share the address but not the chain and prove nothing about this token.",
+  };
+
   // Reference price comes only from pairs that carry an FDV: a dust pool reports
   // none, so it cannot drag the median it is about to be measured against.
   const referencePrices = robin
@@ -206,15 +266,16 @@ function screenPairs(pairs = []) {
     const fallback = robin
       .slice()
       .sort((a, b) => Number(b?.liquidity?.usd || 0) - Number(a?.liquidity?.usd || 0))[0];
-    return { mainPair: fallback, healthy: [], anomalous, medianPrice, screening: "fallback_all_pairs_anomalous" };
+    return { ...sideEvidence, mainPair: fallback, healthy: [], anomalous, medianPrice, screening: "fallback_all_pairs_anomalous" };
   }
 
   return {
+    ...sideEvidence,
     mainPair: healthy[0] || null,
     healthy,
     anomalous,
     medianPrice,
-    screening: anomalous.length ? "screened_outliers" : "clean",
+    screening: robin.length === 0 ? "no_base_side_pair" : anomalous.length ? "screened_outliers" : "clean",
   };
 }
 
@@ -250,26 +311,165 @@ function findDecodedArg(args = [], name) {
   return row ? row[0] : null;
 }
 
-function contractRisk(source = "") {
-  const s = String(source || "");
-  const checks = [
-    ["mint", /\bmint\s*\(|_mint\s*\(|function\s+mint\b/i],
-    ["owner_admin", /\bonlyOwner\b|\bowner\(\)|Ownable|AccessControl|DEFAULT_ADMIN_ROLE/i],
-    ["blacklist", /blacklist|blocklist|isBlacklisted|blocked/i],
-    ["pause", /Pausable|pause\s*\(|paused\b|whenNotPaused/i],
-    ["tax_fee", /buyTax|sellTax|setTax|setFee|transferTax|marketingFee|feeBps/i],
-    ["sell_limit", /maxTx|maxWallet|cooldown|antiBot|restrictionBlocks|sell/i],
-    ["arbitrary_call", /functionCall|delegatecall|call\{value|execute\s*\(/i],
-  ];
-  // Tri-state on purpose: a missing source must never look like "checked, nothing found".
-  if (!s) return Object.fromEntries(checks.map(([name]) => [name, "unknown"]));
-  return Object.fromEntries(checks.map(([name, re]) => [name, re.test(s) ? "present" : "absent"]));
+const SOURCE_SCAN_LIMITS = { files: 12, bytes: 400000, matchesPerCheck: 3 };
+
+// Each entry is [name, pattern, what a hit actually means]. The patterns are
+// deliberately narrower than the obvious keyword: on this chain both Pons token
+// templates are minimal ERC20s, so a scan that flags every "mint(" or the word
+// "sell" produces a wall of false positives and trains the reader to ignore it.
+const RISK_CHECKS = [
+  [
+    "mint",
+    /function\s+(?!_)\w*[Mm]int\w*\s*\([^)]*\)\s*(?:external|public)/,
+    "A mint entrypoint callable from outside the contract. The internal _mint() that every fixed-supply token runs once in its constructor does not match this, and is not a supply risk.",
+  ],
+  [
+    "owner_admin",
+    /\bonlyOwner\b|\bOwnable2?(?:Step)?\b|\bAccessControl\b|DEFAULT_ADMIN_ROLE|\bonlyRole\s*\(/,
+    "A privileged role exists. Check what it can actually do, and whether ownership was renounced.",
+  ],
+  [
+    "blacklist",
+    /blacklist|blocklist|denylist|isBlacklisted|_?isBlocked\b/i,
+    "An address-level transfer block, which can be used to freeze sellers.",
+  ],
+  [
+    "pause",
+    /\bPausable\b|function\s+_?(?:un)?pause\w*\s*\(|whenNotPaused/,
+    "Transfers can be halted.",
+  ],
+  [
+    "tax_fee",
+    /buyTax|sellTax|transferTax|marketingFee|feeBps|\bsetTax\w*\s*\(|\bsetFee\w*\s*\(/i,
+    "A transfer tax or an adjustable fee. Check whether the rate has a hard cap.",
+  ],
+  [
+    "sell_limit",
+    /maxTx\w*|maxWallet\w*|cooldown|antiBot|restrictionBlocks|restrictionsEndBlock|maxSell|sellLimit|tradingEnabled/i,
+    "A trading restriction. Pons V1 tokens carry a launch-window limit that expires at a fixed block: read launchpad.pons.restrictionWindow before calling this a honeypot.",
+  ],
+  [
+    "arbitrary_call",
+    /\bdelegatecall\b|\.call\s*\{|function\s+execute\w*\s*\(/,
+    "The contract can make calls chosen at runtime, which widens the blast radius of any admin role.",
+  ],
+];
+
+const baseName = (path = "") => String(path).split("/").pop() || String(path);
+
+// Scan the token contract plus the base contracts it actually inherits.
+// Scanning every vendored file would light up every flag and misattribute the
+// launchpad's own controls to the token -- a Pons V2 verification ships 86 files
+// including the factory, the bonding curve and the hook -- while scanning only
+// the main file would miss a backdoor sitting in an inherited base.
+function resolveScanScope(contractData) {
+  const main = String(contractData?.source_code || "");
+  const additional = Array.isArray(contractData?.additional_sources) ? contractData.additional_sources : [];
+  const additionalBytes = additional.reduce((n, f) => n + String(f?.source_code || "").length, 0);
+  const empty = {
+    files: [],
+    inherits: [],
+    unresolvedBases: [],
+    additionalSourcesCount: additional.length,
+    additionalSourcesBytes: additionalBytes,
+    scannedBytes: 0,
+  };
+  if (!main) return empty;
+
+  const byContractName = new Map();
+  for (const f of additional) {
+    const name = baseName(f?.file_path || "").replace(/\.sol$/i, "");
+    if (name && !byContractName.has(name)) byContractName.set(name, f);
+  }
+
+  const files = [{ path: baseName(contractData?.file_path || "") || "(main)", code: main }];
+  const inherits = [];
+  const unresolved = [];
+  const seen = new Set();
+  let bytes = main.length;
+  let frontier = [main];
+
+  for (let depth = 0; depth < 3 && frontier.length; depth++) {
+    const next = [];
+    for (const code of frontier) {
+      for (const m of code.matchAll(/\b(?:abstract\s+)?contract\s+\w+\s+is\s+([^{;]+)\{/g)) {
+        for (const raw of m[1].split(",")) {
+          const base = raw.trim().split(/[\s(]/)[0];
+          if (!base || seen.has(base)) continue;
+          seen.add(base);
+          inherits.push(base);
+          const file = byContractName.get(base);
+          if (!file) {
+            unresolved.push(base);
+            continue;
+          }
+          const src = String(file.source_code || "");
+          if (files.length >= SOURCE_SCAN_LIMITS.files || bytes + src.length > SOURCE_SCAN_LIMITS.bytes) {
+            unresolved.push(base);
+            continue;
+          }
+          files.push({ path: baseName(file.file_path || base), code: src });
+          bytes += src.length;
+          next.push(src);
+        }
+      }
+    }
+    frontier = next;
+  }
+
+  return {
+    files,
+    inherits,
+    unresolvedBases: unresolved,
+    additionalSourcesCount: additional.length,
+    additionalSourcesBytes: additionalBytes,
+    scannedBytes: bytes,
+  };
+}
+
+// Tri-state on purpose: a missing source must never read as "checked, nothing found".
+function keywordHits(scope) {
+  const files = (scope?.files || []).map((f) => ({ path: f.path, code: stripSolidityComments(f.code) }));
+  if (!files.length) {
+    return Object.fromEntries(RISK_CHECKS.map(([name, , why]) => [name, { status: "unknown", matches: [], why }]));
+  }
+  const out = {};
+  for (const [name, re, why] of RISK_CHECKS) {
+    // Presence is decided on whole-file text so a signature split across lines
+    // still counts; the line walk afterwards only supplies readable context.
+    const present = files.some((f) => re.test(f.code));
+    const matches = [];
+    let more = false;
+    outer: for (const f of files) {
+      const lines = f.code.split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        if (!re.test(lines[i])) continue;
+        if (matches.length >= SOURCE_SCAN_LIMITS.matchesPerCheck) {
+          more = true;
+          break outer;
+        }
+        matches.push({
+          file: f.path,
+          line: i + 1,
+          code: sanitizeText(lines[i].trim(), "keywordHits." + name, 160),
+        });
+      }
+    }
+    out[name] = {
+      status: present ? "present" : "absent",
+      matches,
+      moreMatches: more,
+      contextAvailable: !present || matches.length > 0,
+      why,
+    };
+  }
+  return out;
 }
 
 function stripSolidityComments(source = "") {
   return String(source || "")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/\/\/.*$/gm, "");
+    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "))
+    .replace(/\/\/[^\n]*/g, (m) => " ".repeat(m.length));
 }
 
 function summarizeOrders(data) {
@@ -412,21 +612,37 @@ async function findLaunchTx(ca, deployer, launchFactory, addressData) {
     }
   }
   if (!isAddress(deployer)) return null;
-  const txsRes = await getJson(API.addressTxs(deployer));
-  const txs = txsRes.ok ? txsRes.data?.items || [] : [];
-  const candidates = txs
-    .filter(
-      (tx) =>
-        tx?.hash &&
-        ((isAddress(launchFactory) && tx?.to?.hash?.toLowerCase() === launchFactory.toLowerCase()) ||
-          /launch/i.test(String(tx?.method || "")))
-    )
-    .slice(0, 10);
-  for (const tx of candidates) {
-    const logsRes = await getJson(API.txLogs(tx.hash));
-    if (!logsRes.ok) continue;
-    const logs = logsRes.data?.items || [];
-    if (eventForToken(logs, "TokenLaunched", ca)) return { hash: tx.hash, logs, via: "deployer_tx_scan" };
+
+  // A launchpad deployer can have hundreds of transactions, and the launch we
+  // want is not necessarily on page one. Walk a bounded number of pages instead
+  // of silently giving up after the first.
+  const isCandidate = (tx) =>
+    tx?.hash &&
+    ((isAddress(launchFactory) && tx?.to?.hash?.toLowerCase() === launchFactory.toLowerCase()) ||
+      /launch/i.test(String(tx?.method || "")));
+
+  let pageParams = null;
+  let inspected = 0;
+  let pagesScanned = 0;
+  for (let page = 0; page < 4; page++) {
+    const query = pageParams
+      ? "?" + new URLSearchParams(Object.entries(pageParams).filter(([, v]) => v !== null && v !== undefined))
+      : "";
+    const txsRes = await getJson(API.addressTxs(deployer) + query);
+    if (!txsRes.ok) break;
+    pagesScanned += 1;
+    for (const tx of (txsRes.data?.items || []).filter(isCandidate)) {
+      if (inspected >= 20) break;
+      inspected += 1;
+      const logsRes = await getJson(API.txLogs(tx.hash));
+      if (!logsRes.ok) continue;
+      const logs = logsRes.data?.items || [];
+      if (eventForToken(logs, "TokenLaunched", ca)) {
+        return { hash: tx.hash, logs, via: "deployer_tx_scan", pagesScanned, txsInspected: inspected };
+      }
+    }
+    pageParams = txsRes.data?.next_page_params;
+    if (!pageParams || inspected >= 20) break;
   }
   return null;
 }
@@ -575,6 +791,132 @@ async function traceGraduation(ca, curve) {
   };
 }
 
+// Roles decide how a balance is read. Supply sitting in a pool or burned is not
+// somebody's position; supply sitting with the deployer is exactly the thing a
+// concentration number is supposed to surface, so it stays in the count.
+const HOLDER_ROLES = {
+  burn_zero_address: "burn",
+  burn_dead_address: "burn",
+  uniswap_v4_pool_manager: "liquidity",
+  bonding_curve: "liquidity",
+  launch_pool: "liquidity",
+  v4_position_manager: "liquidity",
+  lp_position_locker: "liquidity",
+  launchpad_factory: "liquidity",
+  launch_deployer: "insider",
+  fee_wallet: "insider",
+};
+
+function infrastructureAddresses(pons, contractData) {
+  const map = new Map();
+  const add = (addr, label) => {
+    const key = String(addr || "").toLowerCase();
+    if (isAddress(addr) && !map.has(key)) map.set(key, label);
+  };
+  add(ZERO_ADDRESS, "burn_zero_address");
+  add(DEAD_ADDRESS, "burn_dead_address");
+  add(V4_POOL_MANAGER, "uniswap_v4_pool_manager");
+  add(pons?.deployer, "launch_deployer");
+  add(pons?.launchFactory, "launchpad_factory");
+  add(pons?.tokenLaunched?.curve, "bonding_curve");
+  add(pons?.tokenLaunched?.pool, "launch_pool");
+  add(pons?.positionManager, "v4_position_manager");
+  add(pons?.nftOwner?.owner, "lp_position_locker");
+  add(findDecodedArg(contractData?.decoded_constructor_args || [], "feeWallet_"), "fee_wallet");
+  return map;
+}
+
+function summarizeHolders(res, totalSupply, infra) {
+  if (!res.ok) {
+    return {
+      status: "unknown_source_failed",
+      error: res.error || res.status,
+      note:
+        "Holder distribution was never retrieved. This is a check that did not run, not a clean result: do not describe concentration as acceptable.",
+    };
+  }
+  let supply = null;
+  try {
+    supply = BigInt(String(totalSupply ?? "").trim() || "0");
+  } catch {
+    supply = null;
+  }
+  const pct = (value) => {
+    if (!supply || supply <= 0n) return null;
+    try {
+      return Number((BigInt(String(value)) * 1000000n) / supply) / 10000;
+    } catch {
+      return null;
+    }
+  };
+  const rows = (res.data?.items || []).map((item) => {
+    const address = item?.address?.hash || null;
+    const known = infra.get(String(address || "").toLowerCase()) || null;
+    return {
+      address,
+      pct: pct(item?.value),
+      role: known ? HOLDER_ROLES[known] || "known" : "unlabelled",
+      label: known || sanitizeText(item?.address?.name, "holders.label", 60) || null,
+      isContract: Boolean(item?.address?.is_contract),
+    };
+  });
+  const parked = (r) => r.role === "liquidity" || r.role === "burn";
+  const sum = (list) => round2(list.reduce((n, r) => n + (Number(r.pct) || 0), 0));
+  const concentrating = rows.filter((r) => !parked(r));
+  const top10 = rows.slice(0, 10);
+  const top10Concentrating = concentrating.slice(0, 10);
+  return {
+    status: "ok",
+    supplyKnown: Boolean(supply && supply > 0n),
+    holdersReturned: rows.length,
+    pooledOrBurnedPct: sum(rows.filter(parked)),
+    insiderPct: sum(rows.filter((r) => r.role === "insider")),
+    top10Pct: sum(top10),
+    top10ConcentrationPct: sum(top10Concentrating),
+    top10: top10,
+    top10Concentrating,
+    note:
+      "Percentages are share of total supply, from the top holders page (one page, sorted descending, so the top 10 is exact whenever holdersReturned is at least 10). Quote top10ConcentrationPct, not top10Pct: on a launchpad token the pool manager, bonding curve, locker and burn address hold most of the supply by design and are not whales. The deployer and fee wallet are insiders and stay in the count. Unlabelled contract holders may still be infrastructure this probe does not know about: check before calling one a whale.",
+  };
+}
+
+// When DexScreener shows no base-side pair, the chain still knows what is parked
+// where. This is the fallback answer to "is there anything to trade against".
+async function probeOnchainLiquidity(address, role, ca, quoteToken) {
+  if (!isAddress(address)) return null;
+  const res = await getJson(API.tokenBalances(address));
+  if (!res.ok) {
+    return { address, role, status: "unknown_source_failed", error: res.error || res.status };
+  }
+  const items = Array.isArray(res.data) ? res.data : res.data?.items || [];
+  const lcCa = String(ca || "").toLowerCase();
+  const lcQuote = String(quoteToken || "").toLowerCase();
+  const rows = items.map((b) => {
+    const tokenAddress = b?.token?.address_hash || b?.token?.address || null;
+    const lc = String(tokenAddress || "").toLowerCase();
+    return {
+      symbol: sanitizeText(b?.token?.symbol, "onchainLiquidity.symbol", 32),
+      tokenAddress,
+      decimals: b?.token?.decimals ?? null,
+      value: b?.value ?? null,
+      // Pool and curve addresses collect unsolicited airdrops. Ranking the two
+      // sides of the market first keeps them from being pushed off the list.
+      relation: lc && lc === lcCa ? "queried_token" : lc && lcQuote && lc === lcQuote ? "quote_asset" : "unrelated",
+    };
+  });
+  const rank = { queried_token: 0, quote_asset: 1, unrelated: 2 };
+  rows.sort((a, b) => rank[a.relation] - rank[b.relation]);
+  return {
+    address,
+    role,
+    status: "ok",
+    balancesReturned: rows.length,
+    balances: rows.slice(0, 8),
+    note:
+      "Raw balances held by this address: not a price, and not exit liquidity. Only queried_token and quote_asset belong to this market. Entries marked unrelated were sent here by somebody else -- pool and curve addresses collect airdrop spam -- and must never be read as liquidity. On a bonding curve the quote balance is the current reserve, not what a holder could actually exit into.",
+  };
+}
+
 async function probePonsLaunch(ca, contractData, addressData, mainPair) {
   const decodedArgs = contractData?.decoded_constructor_args || [];
   const deployer = findDecodedArg(decodedArgs, "deployer_");
@@ -620,6 +962,24 @@ async function probePonsLaunch(ca, contractData, addressData, mainPair) {
     }
   }
 
+  // A Pons V1 token ships a launch-window trading limit that expires at a fixed
+  // block. Reporting the raw keyword without saying whether the window closed
+  // turns an expired anti-sniper guard into a permanent honeypot claim.
+  const restrictionsEndBlock = launched.restrictionsEndBlock ?? launched.restrictionEndBlock ?? null;
+  let restrictionWindow = null;
+  if (restrictionsEndBlock !== null && restrictionsEndBlock !== undefined) {
+    const end = Number(restrictionsEndBlock);
+    const statsRes = await getJson(API.stats());
+    const latest = statsRes.ok ? Number(statsRes.data?.total_blocks) : NaN;
+    restrictionWindow = {
+      restrictionsEndBlock: Number.isFinite(end) ? end : String(restrictionsEndBlock),
+      approxLatestBlock: Number.isFinite(latest) ? latest : null,
+      expired: Number.isFinite(latest) && Number.isFinite(end) ? latest > end : null,
+      note:
+        "approxLatestBlock is the chain's total block count, which tracks height to within a block. expired=true means the launch-window limit no longer applies, so a sell_limit keyword hit is historical. expired=null means the check did not run: do not assume either way.",
+    };
+  }
+
   const { nftOwner, lockerContract, lockerRisk } = await inspectLocker(positionManager, positionId);
 
   const dexPool = mainPair?.pairAddress || null;
@@ -661,6 +1021,7 @@ async function probePonsLaunch(ca, contractData, addressData, mainPair) {
     launchTxFoundVia: launch.via,
     launchModel,
     lpLockVerification,
+    restrictionWindow,
     tokenLaunched: launched,
     positionLocked: locked,
     feeRedirect,
@@ -689,7 +1050,7 @@ async function main() {
     getJson(API.address(CA)),
   ]);
 
-  const pairScreen = dexRes.ok ? screenPairs(dexRes.data?.pairs || []) : null;
+  const pairScreen = dexRes.ok ? screenPairs(dexRes.data?.pairs || [], CA) : null;
   const mainPair = pairScreen?.mainPair || null;
   const tokenName = sanitizeText(mainPair?.baseToken?.name || (tokenRes.ok ? tokenRes.data?.name : null), "tokenName");
   const tokenSymbol = sanitizeText(mainPair?.baseToken?.symbol || (tokenRes.ok ? tokenRes.data?.symbol : null), "tokenSymbol", 32);
@@ -707,6 +1068,27 @@ async function main() {
   const addressData = addressRes.ok ? addressRes.data : null;
   const pons = contractData ? await probePonsLaunch(CA, contractData, addressData, mainPair) : null;
   const source = contractData?.source_code || "";
+  const scanScope = resolveScanScope(contractData);
+
+  // Holder roles depend on the launch trace, so this runs after the Pons probe.
+  const holdersRes = await getJson(API.holders(CA));
+  const holders = summarizeHolders(
+    holdersRes,
+    tokenRes.ok ? tokenRes.data?.total_supply : null,
+    infrastructureAddresses(pons, contractData)
+  );
+
+  // No base-side pair on DexScreener does not mean nothing is parked on chain.
+  const fallbackTarget = mainPair
+    ? null
+    : isAddress(pons?.tokenLaunched?.curve)
+      ? { address: pons.tokenLaunched.curve, role: "bonding_curve" }
+      : isAddress(pons?.tokenLaunched?.pool)
+        ? { address: pons.tokenLaunched.pool, role: "launch_pool" }
+        : null;
+  const onchainLiquidity = fallbackTarget
+    ? await probeOnchainLiquidity(fallbackTarget.address, fallbackTarget.role, CA, pons?.tokenLaunched?.pairToken)
+    : null;
 
   const sources = {
     dexToken: sourceStatus(dexRes),
@@ -715,6 +1097,7 @@ async function main() {
     blockscoutCounters: sourceStatus(countersRes),
     blockscoutContract: sourceStatus(contractRes),
     blockscoutAddress: sourceStatus(addressRes),
+    blockscoutHolders: sourceStatus(holdersRes),
   };
   const failedSources = Object.entries(sources).filter(([, s]) => s.status !== "ok").map(([k]) => k);
   const completeness =
@@ -754,6 +1137,15 @@ async function main() {
       aggregate: aggregatePairs(pairScreen?.healthy || []),
       aggregateNote:
         "Summed across screened Robinhood Chain pools. Prefer this over mainPair when liquidity is split across many pools.",
+      tokenSide: pairScreen?.tokenSide ?? null,
+      basePairs: pairScreen?.basePairs ?? null,
+      quoteSidePairs: pairScreen?.quoteSidePairs ?? null,
+      unrelatedPairsDropped: pairScreen?.unrelatedPairsDropped ?? null,
+      crossChainPairs: pairScreen?.crossChainPairs ?? null,
+      sideNote: pairScreen?.sideNote ?? null,
+      onchainLiquidity,
+      onchainLiquidityNote:
+        "Present only when DexScreener showed no pair with this CA as the base token. It is a fallback picture of what is parked on chain, not a market.",
       paid: ordersRes.ok ? summarizeOrders(ordersRes.data) : { ok: false, error: ordersRes.error || ordersRes.status },
     },
     blockscout: {
@@ -783,13 +1175,25 @@ async function main() {
         decodedConstructorArgs: sanitizeDecoded(contractData.decoded_constructor_args, "contract.decodedConstructorArgs"),
       } : { ok: false, error: contractRes.error || contractRes.status },
     },
+    holders,
     contractRisk: {
       sourceAvailable: Boolean(source),
       scanStatus: source ? "scanned" : "unknown_no_source",
-      heuristicFlags: contractRisk(source),
-      flagLegend: "present = keyword matched | absent = scanned, no match | unknown = source never retrieved",
+      scanScope: {
+        scannedFiles: scanScope.files.map((f) => f.path),
+        scannedBytes: scanScope.scannedBytes,
+        inherits: scanScope.inherits,
+        unresolvedBases: scanScope.unresolvedBases,
+        additionalSourcesCount: scanScope.additionalSourcesCount,
+        additionalSourcesBytes: scanScope.additionalSourcesBytes,
+        note:
+          "The scan covers the token contract plus the base contracts it declares, resolved from additional_sources. It deliberately does not cover the rest of the verification bundle: a launchpad ships its factory, curve and hook sources alongside the token, and scanning those would report the launchpad's admin controls as if they were the token's. Anything in unresolvedBases was inherited but not found or not scanned, so a control living there would be missed.",
+      },
+      keywordHits: keywordHits(scanScope),
+      flagLegend:
+        "status: present = pattern matched | absent = scanned, no match | unknown = source never retrieved. matches carry file and line for spot-checking; moreMatches means the list was capped. contextAvailable=false means the pattern matched across line breaks, so no single line is quoted.",
       note:
-        "Heuristic keyword scan only, not an audit. 'unknown' means the check did not run: never report it as 'no backdoor found'. Read source manually before final safety claims.",
+        "Heuristic keyword scan, not an audit. 'unknown' means the check did not run: never report it as 'no backdoor found'. A 'present' is a pointer to read, not a verdict -- read the quoted line and the surrounding function before making a safety claim, and check launchpad.pons.restrictionWindow before treating a sell_limit hit as active.",
     },
     launchpad: {
       pons,

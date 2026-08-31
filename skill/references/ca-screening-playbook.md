@@ -20,6 +20,8 @@ Use this reference when a user gives only a Robinhood Chain CA and wants a fast 
    - `/api/v2/tokens/<CA>/counters`
    - `/api/v2/smart-contracts/<CA>`
    - Capture holders, transfers, verified source, decoded constructor args.
+   - Read `holders.top10ConcentrationPct`, not `top10Pct`. The probe labels the pool manager, bonding curve, LP locker and burn address by role and excludes them from the concentration figure, because supply parked in a pool is liquidity, not a whale. The deployer and fee wallet stay in the figure and are reported separately as `insiderPct`.
+   - Read `contractRisk.scanScope` before quoting any keyword hit. The scan covers the token contract plus its declared base contracts; a Pons V2 verification ships ~86 files and the rest of them belong to the launchpad, not to the token. Then read the matched line in `keywordHits.<check>.matches`: a `sell_limit` hit on a V1 token is usually an `error MaxWalletExceeded` declaration governed by `restrictionWindow`, which has typically long since expired.
 
 4. Contract risk source scan:
    - Search verified source for mint, owner/admin controls, blacklist, pause, tax/fee setters, maxTx/maxWallet, sell/transfer restrictions.
