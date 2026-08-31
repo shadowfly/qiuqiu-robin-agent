@@ -1,0 +1,16 @@
+{
+  "id": "chatcmpl-search-1",
+  "choices": [
+    {
+      "message": {
+        "role": "assistant",
+        "content": "{\"answer\":\"Robinhood Chain documentation confirms the network context.\",\"sources\":[{\"url\":\"https://docs.robinhood.com/crypto/robinhood-chain/\",\"title\":\"Robinhood Chain documentation\",\"publishedAt\":null,\"snippet\":\"Official documentation\"}],\"queriesUsed\":[\"Robinhood Chain official documentation\"]}"
+      }
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 120,
+    "completion_tokens": 80,
+    "total_tokens": 200
+  }
+}

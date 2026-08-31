@@ -1,0 +1,18 @@
+{
+  "items": [
+    {
+      "id": "project-1",
+      "username": "project_alpha",
+      "name": "Project Alpha",
+      "description": "A discovered project",
+      "url": "https://example.com",
+      "contract_address": "0x1111111111111111111111111111111111111111",
+      "tags": [{ "slug": "defi" }],
+      "chains": [{ "slug": "robinhood" }],
+      "followers_count": 5000,
+      "smart_followers_count": 25,
+      "smart_mentions_count": 11,
+      "moni_score": 72
+    }
+  ]
+}

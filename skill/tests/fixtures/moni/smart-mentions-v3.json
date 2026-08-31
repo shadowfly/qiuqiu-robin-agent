@@ -1,0 +1,13 @@
+{
+  "items": [
+    {
+      "createdAt": 1788152299,
+      "type": "NEW_MENTION",
+      "data": {
+        "mentionBy": { "userUrl": "https://x.com/graildoteth" },
+        "postUrl": "https://x.com/1499879157672648708/status/2094288652612579587",
+        "postId": "2094288652612579587"
+      }
+    }
+  ]
+}

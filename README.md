@@ -177,6 +177,23 @@ bash skill/scripts/run_robinhood_chain_narrative_radar.sh quick 0x6a98c4145cc8ea
 
 脚本会先输出 JSON，再输出人工复核 checklist。
 
+链上探针采用分层架构：薄 CLI → `lib/onchain/probe.mjs` 编排 → DexScreener/Blockscout provider → Dex、合约、Pons/LP、holders 等独立领域分析器。网络端点、传输错误和安全判断彼此隔离，现有 CLI 与 JSON 契约保持兼容。
+
+可选接入 Moni Discover 社交情报（Key 仅通过 `MONI_API_KEY` 环境变量提供）：
+
+```bash
+node skill/scripts/moni_discover_probe.mjs <X_HANDLE> quick
+node skill/scripts/robinhood_research_bundle.mjs <CA> deep --timeframe D30
+node skill/scripts/moni_discovery_feed.mjs projects --chain robinhood --limit 20
+node skill/scripts/web_research_probe.mjs --deep "Robinhood Chain latest ecosystem"
+```
+
+`quick` 预计请求 8 points；`deep` 预计请求 21 points。成功响应默认缓存 15 分钟。Moni 未配置、未收录或暂时失败时，链上探针仍独立返回结果。
+
+`moni_discovery_feed.mjs` 是独立的市场发现入口，支持 `projects`、`events` 和 `smart-mentions`；结果只作为候选线索，必须重新经过 CA、合约与 LP 验证。
+
+网络研究默认通过 `GROK_API_KEY` 调用 `grok-chat-fast`。Research Bundle 的 `deep` 模式默认启用，`quick` 可加 `--search`。如果 Grok 不可用或没有返回可核验 URL，输出 `fallback.required=true`，由 Agent 使用自带网络搜索继续完成查询。
+
 ---
 
 ## 📦 JSON 输出重点
@@ -190,7 +207,14 @@ bash skill/scripts/run_robinhood_chain_narrative_radar.sh quick 0x6a98c4145cc8ea
 - `blockscout.contract`：源码是否 verified、构造参数。
 - `contractRisk.heuristicFlags`：合约风险关键词。
 - `launchpad.pons`：Pons launch tx、LP NFT tokenId、locker owner、locker 源码风险。
+- `launchpad.pons.graduation`：毕业状态、poolId、positionId、锁仓金额。V2 毕业不是原子的，`poolEvidenceFrom` 说明证据取自哪笔交易：`pool_graduated_event`（按 topic 定位到真正建池的那笔）或 `curve_completed_tx`（旧版原子毕业）；`graduationTx` 即该交易。
 - `narrativeSearch`：按 CA、token name、symbol、官网域名、X handle、RWA/AI/Robinhood 概念生成的搜索查询和证据标签。
+- Research Bundle 的 `socialIntelligence`：可选 Moni Score、Smart Tier、提及趋势、Smart Mentions 和账户事件，并单独报告覆盖状态、预计 points 与缓存命中。
+- Research Bundle 的 `webResearch`：Grok 搜索摘要、直接来源 URL、token usage，以及 Agent 内置搜索回退契约。
+
+Moni 查询使用的 X handle 默认来自项目方可控的 Dex metadata，因此始终先标为 `identityBinding=unverified`。Moni 热度只能补充 Social Traction，不能证明官方认领 CA、合约安全或 LP 安全。API Key 不得出现在命令参数、日志、fixture 或提交文件中。
+
+Grok 搜索结果同样是外部证据线索。没有直接来源 URL 的回答不会被接受为网络证据；Grok Key 只能放在 `GROK_API_KEY` 环境变量中。
 
 ---
 

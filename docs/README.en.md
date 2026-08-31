@@ -53,6 +53,23 @@ bash skill/scripts/run_robinhood_chain_narrative_radar.sh quick 0x6a98c4145cc8ea
 
 The script outputs JSON first, then a manual evidence checklist.
 
+The on-chain probe is layered as a thin CLI, an application orchestrator, source providers, and focused domain analyzers. DexScreener/Blockscout transport details stay separate from pair screening, contract risk, Pons/LP, and holder interpretation. The existing CLI and JSON contract remain compatible.
+
+Optionally enrich an X account with Moni Discover. Supply the key only through the `MONI_API_KEY` environment variable:
+
+```bash
+node skill/scripts/moni_discover_probe.mjs <X_HANDLE> quick
+node skill/scripts/robinhood_research_bundle.mjs <CA> deep --timeframe D30
+node skill/scripts/moni_discovery_feed.mjs projects --chain robinhood --limit 20
+node skill/scripts/web_research_probe.mjs --deep "Robinhood Chain latest ecosystem"
+```
+
+`quick` requests an estimated 8 points and `deep` requests 21 points. Successful responses are cached for 15 minutes. Missing configuration, account coverage, or Moni availability never changes the on-chain probe result.
+
+The global discovery CLI supports `projects`, `events`, and `smart-mentions`. Treat its output as candidate leads that still require CA, contract, and LP verification.
+
+Network research defaults to `grok-chat-fast` with the key read from `GROK_API_KEY`. Deep Research Bundles search by default; quick bundles accept `--search`. If Grok is unavailable or returns no verifiable URL, the output requests the active agent's built-in web-search fallback.
+
 ## Output Highlights
 
 The probe returns structured JSON with:
@@ -66,7 +83,14 @@ The probe returns structured JSON with:
 - `blockscout.contract`: verified source status and decoded constructor arguments.
 - `contractRisk.heuristicFlags`: source-code risk keywords.
 - `launchpad.pons`: Pons launch transaction, tokenId, LP NFT owner, locker contract, and locker risk signals.
+- `launchpad.pons.graduation`: graduation status, poolId, positionId, and locked amounts. V2 graduation is not atomic, so `poolEvidenceFrom` names the transaction the evidence came from — `pool_graduated_event` (the `PoolGraduated` topic lookup that finds the real pool-creation transaction) or `curve_completed_tx` (older atomic launches). `graduationTx` is that transaction.
 - `narrativeSearch`: generated web/social searches and evidence labels based on CA, token name, symbol, domain, X handle, and Robinhood/RWA/AI concept terms.
+- Research Bundle `socialIntelligence`: optional normalized Moni Score, Smart Tier, mention history, Smart Mentions, account events, source coverage, estimated points, and cache status.
+- Research Bundle `webResearch`: Grok synthesis, direct source URLs, token usage, and the built-in Agent search fallback contract.
+
+The default X handle comes from project-controlled Dex metadata, so it remains `identityBinding=unverified` until the website, X account, or primary documentation explicitly recognizes the same CA. Moni popularity may inform Social Traction; it cannot establish official identity, contract safety, LP safety, or missing chain evidence. Never place the API key in command arguments, logs, fixtures, or committed files.
+
+An uncited Grok answer is not accepted as web evidence. Keep the Grok key only in `GROK_API_KEY`, never in arguments, logs, fixtures, or committed files.
 
 ## Narrative Scorecard
 
