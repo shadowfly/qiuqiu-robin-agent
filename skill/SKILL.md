@@ -54,6 +54,7 @@ When the user gives a CA, default to quick screening:
    - Or directly: `node scripts/robinhood_ca_probe.mjs <CA>`
 2. Read the JSON sections:
    - `dex`: chainId, pair URL, market cap, liquidity, volume, buy/sell tx, paid orders, boost, profile/social links
+   - `dex.aggregate`: liquidity/volume/tx summed across every screened pool. Read this alongside `mainPair`; a single pool understates market structure when liquidity is split. If `dex.mainPairScreening` is `fallback_all_pairs_anomalous`, treat `mainPair` numbers as unreliable and say so instead of quoting them.
    - `blockscout`: token metadata, holder count, transfer count, verified source
    - `contractRisk`: source-code heuristic for mint/owner/blacklist/tax/pause/sell-limit
    - `launchpad`: decoded constructor and Pons launch/LP NFT/locker evidence when available
