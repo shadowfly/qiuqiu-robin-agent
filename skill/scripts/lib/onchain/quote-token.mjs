@@ -34,7 +34,14 @@ export function createQuoteTokenAnalyzer({ blockscout, sanitizeText }) {
 
     const token = tokenResult.data || {};
     const symbol = sanitizeText(token.symbol, "quoteToken.symbol", 32);
-    const holdersCount = Number(token.holders_count);
+    // Number(null) and Number("") are 0, and 0 < THIN_QUOTE_HOLDERS, so coercing a
+    // field the source left empty would report a concrete "thinly held" finding about a
+    // holder count nobody ever returned. A missing count stays unknown.
+    const rawHoldersCount = token.holders_count;
+    const holdersCount =
+      typeof rawHoldersCount === "number" || (typeof rawHoldersCount === "string" && rawHoldersCount.trim() !== "")
+        ? Number(rawHoldersCount)
+        : NaN;
     const isStablecoin = symbol ? STABLE_SYMBOLS.has(symbol.toUpperCase()) : null;
     const isVerified = contractResult.ok ? Boolean(contractResult.data?.is_verified) : null;
 

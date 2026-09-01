@@ -90,6 +90,8 @@ export function summarizeHolders(result, totalSupply, infrastructure, sanitizeTe
       isContract: Boolean(item?.address?.is_contract),
     };
   });
+  const morePages = Boolean(result.data?.next_page_params);
+  const unknownBalances = rows.filter((row) => row.balance === null).length;
   // Do not inherit the source's ordering. "Top 10" is a claim about rank, so rank it here
   // from the balances actually returned; rows whose balance did not parse sort last and
   // are reported rather than silently ranked as zero.
@@ -108,10 +110,15 @@ export function summarizeHolders(result, totalSupply, infrastructure, sanitizeTe
     if (list.some((row) => row.pct === null)) return null;
     return round2(list.reduce((number, row) => number + row.pct, 0));
   };
+  // A rank-derived total is a claim about *which* rows are the largest, so it needs a
+  // complete ordering, not just parseable percentages. A balance that did not parse has
+  // no place in an ordering, and a further page can hold a bigger holder than anything
+  // on this one -- neither is a reason to publish a smaller number.
+  const rankingComplete = unknownBalances === 0 && !morePages;
+  const rankSum = (list) => (rankingComplete ? sum(list) : null);
   const concentrating = ranked.filter((row) => !parked(row));
   const top10 = ranked.slice(0, 10);
   const top10Concentrating = concentrating.slice(0, 10);
-  const morePages = Boolean(result.data?.next_page_params);
   const unknownPct = ranked.filter((row) => row.pct === null).length;
   return {
     status: "ok",
@@ -121,16 +128,18 @@ export function summarizeHolders(result, totalSupply, infrastructure, sanitizeTe
     coverage: morePages ? "first_page_only" : "all_holders_returned",
     percentagesKnown: supplyKnown && unknownPct === 0,
     unknownPercentageHolders: unknownPct,
-    top10Exact: top10.length >= 10 || !morePages,
-    top10ConcentratingExact: top10Concentrating.length >= 10 || !morePages,
+    unknownBalanceHolders: unknownBalances,
+    rankingComplete,
+    top10Exact: rankingComplete,
+    top10ConcentratingExact: rankingComplete,
     pooledOrBurnedPct: sum(ranked.filter(parked)),
     insiderPct: sum(ranked.filter((row) => row.role === "insider")),
-    top10Pct: sum(top10),
-    top10ConcentrationPct: sum(top10Concentrating),
+    top10Pct: rankSum(top10),
+    top10ConcentrationPct: rankSum(top10Concentrating),
     top10,
     top10Concentrating,
     note:
-      "Percentages are share of total supply. null means it could not be computed -- supplyKnown=false, or a balance that did not parse -- and null is never a small number: do not read it as low concentration. Rows are ranked here by returned balance rather than trusting the source's ordering. coverage=first_page_only means only the first holders page was read, so pooledOrBurnedPct and insiderPct are lower bounds and a *Exact=false makes the matching top-10 a page-local ranking. Quote top10ConcentrationPct, not top10Pct: on a launchpad token the pool manager, bonding curve, locker and burn address hold most of the supply by design and are not whales. The deployer and fee wallet are insiders and stay in the count. Unlabelled contract holders may still be infrastructure this probe does not know about: check before calling one a whale.",
+      "Percentages are share of total supply. null means it could not be computed -- supplyKnown=false, or a balance that did not parse -- and null is never a small number: do not read it as low concentration. Rows are ranked here by returned balance rather than trusting the source's ordering. rankingComplete=false means that ordering could not be established -- unknownBalanceHolders rows did not parse, or coverage=first_page_only left holders unread -- and the rank-derived totals top10Pct and top10ConcentrationPct are then null rather than a partial sum presented as the top of the book. coverage=first_page_only also makes pooledOrBurnedPct and insiderPct lower bounds, and a *Exact=false makes the matching top-10 list a page-local ranking that may omit larger holders. Quote top10ConcentrationPct, not top10Pct: on a launchpad token the pool manager, bonding curve, locker and burn address hold most of the supply by design and are not whales. The deployer and fee wallet are insiders and stay in the count. Unlabelled contract holders may still be infrastructure this probe does not know about: check before calling one a whale.",
   };
 }
 

@@ -210,7 +210,20 @@ const HOOK_RISK_CHECKS = [
   check("arbitrary_call"),
 ].filter(Boolean);
 
-export function buildHookRisk(hookAddress, contractData, sanitizeText) {
+export function buildHookRisk(hookAddress, contractData, sanitizeText, addressUnknownReason = null) {
+  // A missing hook address means one of two opposite things, and the caller is the only
+  // one that can tell them apart: the pool announced it runs no hook, or this probe
+  // never got to read which hook it runs. Reporting the second as no_hook would answer
+  // "is the swap path clear" with a positive finding nobody established.
+  if (addressUnknownReason) {
+    return {
+      address: null,
+      scanStatus: "unknown_hook_address",
+      addressUnknownReason,
+      note:
+        "Which hook runs on this pool was never established, so nothing about the swap path was checked. This is a check that did not run, not a pool without a hook: every Uniswap v4 pool carries a hook slot, and a hook can refuse or tax a sell no matter how clean the token contract and the LP lock look. Do not pair this with any claim about sellability.",
+    };
+  }
   // The zero address is the v4 way of declaring "this pool runs no hook". Looking it up
   // fails, and a failed lookup reads as unknown_no_source -- an unchecked hook -- which
   // is the opposite of what the pool actually said.

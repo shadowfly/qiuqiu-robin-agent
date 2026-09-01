@@ -371,6 +371,13 @@ test("Pons analyzer refuses a hook read from a different pool's Initialize", asy
   // The launchpad registered one pool and Uniswap initialized another, so this hook is
   // not evidence about the pool the position was locked in.
   assert.equal(output.graduation.hooks, null);
-  assert.equal(output.hookRisk.scanStatus, "no_hook");
+  // Dropping the hook must not read as "this pool runs no hook": a v4 pool always has a
+  // hook slot, so the answer here is that the swap path was never inspected.
+  assert.equal(output.hookRisk.scanStatus, "unknown_hook_address");
+  assert.equal(output.hookRisk.addressUnknownReason, "pool_id_mismatch_hook_belongs_to_another_pool");
   assert.equal(output.lpLockVerification.poolIdAgreement, "mismatch");
+  // Which pool the position sits in is contradicted by the launchpad's own events, so
+  // no lock claim may be made off the half of the contradiction that happens to match.
+  assert.equal(output.lpLockVerification.claimAllowed, false);
+  assert.ok(output.lpLockVerification.claimBlockedBy.includes("pool_id_mismatch_between_launchpad_and_uniswap"));
 });

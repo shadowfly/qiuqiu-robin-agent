@@ -428,9 +428,26 @@ export function createPonsAnalyzer({ blockscout, sanitizeText }) {
     // sell that the token contract itself permits. Scanned separately from the token:
     // a locked LP says nothing about whether the swap path is open.
     const hookAddress = graduation?.hooks || null;
+    // A graduated V2 launch trades on a Uniswap v4 pool, which always has a hook slot,
+    // so "no hook address" there is never the pool answering: it means the Initialize
+    // that would have named the hook was not found, or named a different pool. A V1
+    // direct launch opens a v3 pool, where no hook is the real and only answer.
+    const hookAddressUnknownReason =
+      launchModel === "bonding_curve" && graduation?.status === "graduated" && !graduation?.hooksFrom
+        ? graduation?.poolIdAgreement === "mismatch"
+          ? "pool_id_mismatch_hook_belongs_to_another_pool"
+          : "no_initialize_event_found_for_this_pool"
+        : null;
     const hookResult =
-      isAddress(hookAddress) && !isZeroAddress(hookAddress) ? await blockscout.contract(hookAddress) : null;
-    const hookRisk = buildHookRisk(hookAddress, hookResult?.ok ? hookResult.data : null, sanitizeText);
+      !hookAddressUnknownReason && isAddress(hookAddress) && !isZeroAddress(hookAddress)
+        ? await blockscout.contract(hookAddress)
+        : null;
+    const hookRisk = buildHookRisk(
+      hookAddress,
+      hookResult?.ok ? hookResult.data : null,
+      sanitizeText,
+      hookAddressUnknownReason
+    );
 
     const dexPool = mainPair?.pairAddress || null;
     const lockerHoldsNft = Boolean(nftOwner && isAddress(nftOwner.owner)) && lockerContract?.isVerified === true;
@@ -461,6 +478,11 @@ export function createPonsAnalyzer({ blockscout, sanitizeText }) {
     } else poolMatch = "different_pool_locked";
 
     if (poolMatch !== "main_pool_lock_verified") claimBlockedBy.push("pool_match:" + poolMatch);
+    // The launchpad and Uniswap named different pools in the same transaction, so which
+    // pool the position actually sits in is unresolved. poolMatch compares the DEX main
+    // pair against the registered id alone and can still come back verified off that
+    // half of a contradiction, which is not a lock that was proven.
+    if (graduation?.poolIdAgreement === "mismatch") claimBlockedBy.push("pool_id_mismatch_between_launchpad_and_uniswap");
     if (!lockerHoldsNft) claimBlockedBy.push(nftOwner?.error ? "nft_owner_source_failed" : "locker_does_not_hold_the_position");
     if (noWithdrawSurface === null) claimBlockedBy.push("locker_exit_surface_unknown:" + (lockerRisk?.scanStatus || "locker_not_read"));
     else if (noWithdrawSurface === false) claimBlockedBy.push("locker_exposes_an_exit_surface");
@@ -478,10 +500,14 @@ export function createPonsAnalyzer({ blockscout, sanitizeText }) {
       lockerHoldsNft,
       lockerScanStatus: lockerRisk?.scanStatus || "locker_not_read",
       noWithdrawSurface,
-      claimAllowed: poolMatch === "main_pool_lock_verified" && lockerHoldsNft && noWithdrawSurface === true,
+      claimAllowed:
+        poolMatch === "main_pool_lock_verified" &&
+        lockerHoldsNft &&
+        noWithdrawSurface === true &&
+        graduation?.poolIdAgreement !== "mismatch",
       claimBlockedBy,
       note:
-        "Do not write 'LP locked' unless claimAllowed is true; claimBlockedBy lists every reason it is not, and a locker_exit_surface_unknown entry means custody was never checked rather than checked and cleared. main_pool_lock_verified means the pool the position was locked in is the same pool DexScreener shows as the main pair (on Uniswap v4 both are the 32-byte poolId). different_pool_locked is a red flag: something is locked, but not the pool people trade against. no_pool_yet_still_on_curve means the token has not graduated off the bonding curve, so there is no LP to lock. dex_pool_not_from_launchpad is a red flag: the token is still on the curve, yet DexScreener already lists a pool, so that pool was opened by someone else and carries no launchpad lock at all -- check its liquidity depth before treating any quoted price as real. Any unknown_* means the link was never proven: report LP as unverified, never as safe.",
+        "Do not write 'LP locked' unless claimAllowed is true; claimBlockedBy lists every reason it is not, and a locker_exit_surface_unknown entry means custody was never checked rather than checked and cleared. main_pool_lock_verified means the pool the position was locked in is the same pool DexScreener shows as the main pair (on Uniswap v4 both are the 32-byte poolId). different_pool_locked is a red flag: something is locked, but not the pool people trade against. no_pool_yet_still_on_curve means the token has not graduated off the bonding curve, so there is no LP to lock. dex_pool_not_from_launchpad is a red flag: the token is still on the curve, yet DexScreener already lists a pool, so that pool was opened by someone else and carries no launchpad lock at all -- check its liquidity depth before treating any quoted price as real. Any unknown_* means the link was never proven: report LP as unverified, never as safe. poolIdAgreement=mismatch means the launchpad and Uniswap named different pools in the same transaction, so the pool the position sits in is unresolved and the claim is blocked no matter what poolMatch says.",
       swapPathNote:
         "claimAllowed answers one question only: is the position locked in the pool people trade against. It does not say the pool is tradable. On Uniswap v4 the hook runs inside every swap and can refuse or tax a sell, so read launchpad.pons.hookRisk before pairing this with any claim about sellability.",
     };

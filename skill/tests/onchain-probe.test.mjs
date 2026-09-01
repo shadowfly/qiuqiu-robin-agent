@@ -164,6 +164,21 @@ test("probe flags a floating, unverified, thinly held quote side", async () => {
   ]);
 });
 
+test("an absent quote-token holder count stays unknown instead of counting as zero", async () => {
+  for (const holders of [null, undefined, ""]) {
+    const probe = createRobinhoodCaProbe({
+      ...quoteAwareProviders({ symbol: "USDG", name: "Global Dollar", holders, isVerified: true }),
+      now: () => 0,
+    });
+    const output = await probe.probe(CA);
+
+    // Number(null) is 0, and 0 is below the thin-quote threshold, so a coerced empty
+    // field would publish a concrete finding about a count the source never returned.
+    assert.equal(output.dex.quoteToken.holdersCount, null, `holders=${JSON.stringify(holders)}`);
+    assert.deepEqual(output.dex.quoteToken.quoteRisks, ["quote_token_holder_count_unknown"]);
+  }
+});
+
 test("probe never guesses a price reference when the quote side cannot be read", async () => {
   const probe = createRobinhoodCaProbe({
     ...quoteAwareProviders({ tokenOk: false, symbol: "USDG", holders: 90000, isVerified: true }),
