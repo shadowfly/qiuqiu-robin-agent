@@ -40,14 +40,19 @@ export function createSanitizer() {
     }
   }
 
+  // Keys are attacker-controlled too: a decoded struct field, a counter name or a
+  // DexScreener boost key is a string the deployer or the API chose. Sanitizing only the
+  // values leaves an unchecked channel that reaches the agent verbatim.
   function sanitizeDecoded(value, field, depth = 0) {
     if (depth > 6) return null;
     if (typeof value === "string") return sanitizeText(value, field, 300);
     if (Array.isArray(value)) return value.map((item, index) => sanitizeDecoded(item, `${field}[${index}]`, depth + 1));
     if (value && typeof value === "object") {
-      return Object.fromEntries(
-        Object.entries(value).map(([key, item]) => [key, sanitizeDecoded(item, `${field}.${key}`, depth + 1)])
-      );
+      const entries = Object.entries(value).map(([key, item]) => [
+        sanitizeText(key, `${field}.<key>`, 64) || "unnamed_key",
+        sanitizeDecoded(item, `${field}.${key}`, depth + 1),
+      ]);
+      return Object.fromEntries(entries);
     }
     return value;
   }
