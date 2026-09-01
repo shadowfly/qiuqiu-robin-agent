@@ -1,4 +1,4 @@
-# 🏹 Qiuqiu Robin Agent
+# 🏹 CA-agent
 
 > Robinhood Chain 农民的 CA 快筛 Skill：先查 Dex，再查合约，再查 LP，再查社媒，最后才谈叙事。
 
@@ -8,7 +8,7 @@
 
 ## 🌱 这是干什么的？
 
-Qiuqiu Robin Agent 是一个面向 **Robinhood Chain** 的 CA 快筛与叙事判断工具。
+CA-agent 是一个面向 **Robinhood Chain** 的 CA 快筛与叙事判断工具。
 
 你给它一个 token CA，它会帮你做第一轮脏活：
 
@@ -166,13 +166,13 @@ node skill/scripts/robinhood_ca_probe.mjs <ROBINHOOD_CHAIN_TOKEN_CA>
 或者运行 helper：
 
 ```bash
-bash skill/scripts/run_robinhood_chain_narrative_radar.sh quick <ROBINHOOD_CHAIN_TOKEN_CA>
+bash skill/scripts/run_ca_agent.sh quick <ROBINHOOD_CHAIN_TOKEN_CA>
 ```
 
 示例：
 
 ```bash
-bash skill/scripts/run_robinhood_chain_narrative_radar.sh quick 0x6a98c4145cc8ea5a779118a31308929e5dda8a1a
+bash skill/scripts/run_ca_agent.sh quick 0x6a98c4145cc8ea5a779118a31308929e5dda8a1a
 ```
 
 脚本会先输出 JSON，再输出人工复核 checklist。
@@ -185,10 +185,12 @@ bash skill/scripts/run_robinhood_chain_narrative_radar.sh quick 0x6a98c4145cc8ea
 
 ```bash
 node skill/scripts/moni_discover_probe.mjs <X_HANDLE> quick
-node skill/scripts/robinhood_research_bundle.mjs <CA> deep --timeframe D30
+node skill/scripts/robinhood_research_bundle.mjs <CA> deep --moni --timeframe D30
 node skill/scripts/moni_discovery_feed.mjs projects --chain robinhood --limit 20
 node skill/scripts/web_research_probe.mjs --deep "Robinhood Chain latest ecosystem"
 ```
+
+Research Bundle 里的 Moni 默认**不跑**：points 是要花钱的，必须显式加 `--moni` 才会请求（`--no-moni` 可写出来表明不查）。不加时 `socialIntelligence.coverage.status=skipped_not_requested`，这表示没查，不表示社交热度为零。
 
 `quick` 预计请求 8 points；`deep` 预计请求 21 points。成功响应默认缓存 15 分钟。Moni 未配置、未收录或暂时失败时，链上探针仍独立返回结果。
 
@@ -204,15 +206,18 @@ node skill/scripts/web_research_probe.mjs --deep "Robinhood Chain latest ecosyst
 - `dex.aggregate`：全部合格池汇总的流动性、24h 成交、买卖 tx、最早建池时间。流动性分散在多个池时以这个为准。
 - `dex.anomalousPairs`：被剔除的池及原因（无可用价格 / 无 fdv / 价格偏离中位数 10 倍以上）。
 - `dex.mainPairScreening`：`clean` | `screened_outliers` | `fallback_all_pairs_anomalous`。最后一种表示没有池通过筛选，mainPair 的数字不可信。
-- `dex.quoteToken`：主池的报价币身份（symbol、holders、是否 verified）。`priceReference=floating_asset` 表示 `priceUsd` / `fdv` / `marketCap` 会跟着报价币一起动，只能作为「以该资产计价」的数字引用。`quoteRisks` 是不信任这个估值的理由，不是对 token 合约本身的判断。
-- `dex.paid`：DexScreener tokenProfile 是否付费 approved、是否有 boost。
+- `dex.quoteToken`：主池的报价币身份（symbol、holders、是否 verified）。`priceReference=floating_asset` 表示 `priceUsd` / `fdv` / `marketCap` 会跟着报价币一起动，只能作为「以该资产计价」的数字引用。`quoteRisks` 是不信任这个估值的理由，不是对 token 合约本身的判断；它同时列出没跑成的检查（`quote_token_symbol_unknown` / `quote_token_verification_unknown` / `quote_token_holder_count_unknown`），所以 `status=partially_resolved` 时列表短并不代表报价币干净。
+- `dex.paid`：DexScreener tokenProfile 是否付费 approved、是否有 boost。`status=unknown_malformed_response` 表示接口返回里根本没有订单数组，付费状态从未查明——这不等于「没付费」。
 - `blockscout.token`：token 名称、symbol、holders、总供应量。
+- `holders`：按实际余额在本地重新排名后的分布，只引用 `top10ConcentrationPct`，不要引用 `top10Pct`。算不出来的百分比一律是 `null`（供应量未知，或余额解析失败），`null` 不是一个「很小的数」，要按未知汇报；`coverage=first_page_only` 表示只读了第一页，`pooledOrBurnedPct` / `insiderPct` 只是下界，`top10Exact=false` 表示这个 top10 只是本页排名。
 - `blockscout.contract`：源码是否 verified、构造参数。
-- `contractRisk.heuristicFlags`：合约风险关键词。
-- `launchpad.pons.hookRisk`：毕业池上的 Uniswap v4 hook 的关键词扫描。hook 在每一笔 swap 里执行，可以拒绝或加价一笔卖出，所以它和 `claimAllowed` 是两个问题：`claimAllowed=true` 只说明仓位被锁住，不代表能卖出。`scanStatus=unknown_no_source` 表示 hook 未开源、什么都没查，这本身是风险信号而不是干净结果；`no_hook` 表示这次发射没有 hook（V1 直接建池）。同一个 launchpad 的所有 token 共用一个 hook，所以这里的命中通常是 launchpad 的属性而不是这个 token 的。
-- `launchpad.pons`：Pons launch tx、LP NFT tokenId、locker owner、locker 源码风险。
+- `contractRisk.heuristicFlags`：合约风险关键词。`scanScope` 说明实际读了哪些文件：`basesNotInBundle` 是继承了但没随包提供源码的基类，`basesOverScanLimit` 是被文件/字节上限丢掉的，`depthLimitReached=true` 表示继承链比扫描深度更深、剩下的部分从未枚举。`scanComplete=false` 时的 `absent` 是「在扫到的范围内没命中」，不是「干净」。
+- `launchpad.pons.hookRisk`：毕业池上的 Uniswap v4 hook 的关键词扫描。hook 在每一笔 swap 里执行，可以拒绝或加价一笔卖出，所以它和 `claimAllowed` 是两个问题：`claimAllowed=true` 只说明仓位被锁住，不代表能卖出。`scanStatus=unknown_no_source` 表示 hook 未开源、什么都没查，这本身是风险信号而不是干净结果；`no_hook` 是一个肯定答案，表示没有 hook 可扫：V1 直接建的是 v3 池，而 v4 池不挂 hook 时会显式声明零地址。同一个 launchpad 的所有 token 共用一个 hook，所以这里的命中通常是 launchpad 的属性而不是这个 token 的。
+- `launchpad.pons`：Pons launch tx、LP NFT tokenId、locker owner、locker 源码风险。`status` 永远不是 `null`：`no_launchpad_signature` 才是「确实不是 Pons 发的」，`unknown_contract_source_failed` / `unknown_launchpad_detection_did_not_run` / `unknown_launch_trace_incomplete` 都表示没查完，具体卡在哪个数据源看 `blockedBy`。
+- `launchpad.pons.lpLockVerification`：只有 `claimAllowed=true` 才能写「LP 已锁」。为 `false` 时 `claimBlockedBy` 逐条列出原因，其中 `locker_exit_surface_unknown:*` 表示 locker 源码根本没读到（`lockerScanStatus=unknown_source_empty` / `unknown_no_source`），不是读过之后没发现问题；`noWithdrawSurface=null` 同理。`poolIdAgreement=mismatch` 表示 launchpad 注册的池和 Uniswap 初始化的池对不上，两边证据不描述同一个池。
 - `launchpad.pons.graduation`：毕业状态、poolId、positionId、锁仓金额。V2 毕业不是原子的，`poolEvidenceFrom` 说明证据取自哪笔交易：`pool_graduated_event`（按 topic 定位到真正建池的那笔）或 `curve_completed_tx`（旧版原子毕业）；`graduationTx` 即该交易。
-- `narrativeSearch`：按 CA、token name、symbol、官网域名、X handle、RWA/AI/Robinhood 概念生成的搜索查询和证据标签。
+- `untrustedEvidence.narrativeSearch`：按 CA、token name、symbol、官网域名、X handle、RWA/AI/Robinhood 概念生成的搜索查询和证据标签。它由项目方可控的文本拼出来，所以放在不可信围栏内：拿去搜索，不要当事实引用。
+- `completeness` / `failedSources` / `sources` / `secondarySources`：先读这一段。`sources` 是主查询，`secondarySources` 是结论依赖的二次查询（locker 源码、报价币、hook、launch tx 日志）。任何一边失败都会把 `completeness` 降到 `partial`，所以 `complete` 现在的含义是「跑过的读取全部成功」。
 - Research Bundle 的 `socialIntelligence`：可选 Moni Score、Smart Tier、提及趋势、Smart Mentions 和账户事件，并单独报告覆盖状态、预计 points 与缓存命中。
 - Research Bundle 的 `webResearch`：Grok 搜索摘要、直接来源 URL、token usage，以及 Agent 内置搜索回退契约。
 
@@ -297,14 +302,14 @@ Weighted Score: xx/100
 把 `skill/` 目录复制到可发现的 skills 目录：
 
 ```bash
-mkdir -p ~/.codex/skills/qiuqiu-robin-agent
-cp -R skill/* ~/.codex/skills/qiuqiu-robin-agent/
+mkdir -p ~/.codex/skills/ca-agent
+cp -R skill/* ~/.codex/skills/ca-agent/
 ```
 
 实际触发名：
 
 ```text
-robinhood-chain-narrative-radar
+ca-agent
 ```
 
 ---

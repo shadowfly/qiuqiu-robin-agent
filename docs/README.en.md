@@ -1,6 +1,6 @@
-# Qiuqiu Robin Agent
+# CA-agent
 
-Qiuqiu Robin Agent is a CA-first research skill for Robinhood Chain tokens. It helps an AI agent quickly inspect a token contract address, collect market and social evidence, check DexScreener paid profile status, review Blockscout contract data, identify launchpad and LP-lock evidence, and classify the token's Robinhood Chain narrative.
+CA-agent is a CA-first research skill for Robinhood Chain tokens. It helps an AI agent quickly inspect a token contract address, collect market and social evidence, check DexScreener paid profile status, review Blockscout contract data, identify launchpad and LP-lock evidence, and classify the token's Robinhood Chain narrative.
 
 It is designed for fast due diligence, not trading execution.
 
@@ -42,13 +42,13 @@ node skill/scripts/robinhood_ca_probe.mjs <ROBINHOOD_CHAIN_TOKEN_CA>
 Or run the skill helper:
 
 ```bash
-bash skill/scripts/run_robinhood_chain_narrative_radar.sh quick <ROBINHOOD_CHAIN_TOKEN_CA>
+bash skill/scripts/run_ca_agent.sh quick <ROBINHOOD_CHAIN_TOKEN_CA>
 ```
 
 Example:
 
 ```bash
-bash skill/scripts/run_robinhood_chain_narrative_radar.sh quick 0x6a98c4145cc8ea5a779118a31308929e5dda8a1a
+bash skill/scripts/run_ca_agent.sh quick 0x6a98c4145cc8ea5a779118a31308929e5dda8a1a
 ```
 
 The script outputs JSON first, then a manual evidence checklist.
@@ -61,10 +61,12 @@ Every environment variable the skill reads is listed in [.env.example](../.env.e
 
 ```bash
 node skill/scripts/moni_discover_probe.mjs <X_HANDLE> quick
-node skill/scripts/robinhood_research_bundle.mjs <CA> deep --timeframe D30
+node skill/scripts/robinhood_research_bundle.mjs <CA> deep --moni --timeframe D30
 node skill/scripts/moni_discovery_feed.mjs projects --chain robinhood --limit 20
 node skill/scripts/web_research_probe.mjs --deep "Robinhood Chain latest ecosystem"
 ```
+
+Moni enrichment inside the research bundle is opt-in because it spends metered Discover points: pass `--moni` to run it, or `--no-moni` to say so explicitly. Without it the bundle reports `socialIntelligence.coverage.status=skipped_not_requested`, which means not queried, never zero social traction.
 
 `quick` requests an estimated 8 points and `deep` requests 21 points. Successful responses are cached for 15 minutes. Missing configuration, account coverage, or Moni availability never changes the on-chain probe result.
 
@@ -80,15 +82,18 @@ The probe returns structured JSON with:
 - `dex.aggregate`: liquidity, 24h volume, buy/sell transactions and earliest pair creation summed across every screened pool. Prefer it over `mainPair` when liquidity is split across many pools.
 - `dex.anomalousPairs`: pools dropped before ranking, with the reason (no usable price, no fdv/marketCap, or a price more than 10x off the median).
 - `dex.mainPairScreening`: `clean`, `screened_outliers`, or `fallback_all_pairs_anomalous` - the last means nothing passed and `mainPair`'s numbers are unreliable.
-- `dex.quoteToken`: identity of the asset the main pool prices against (symbol, holders, verification). `priceReference: floating_asset` means `priceUsd`, `fdv` and `marketCap` move with it and must be quoted as denominated figures. `quoteRisks` are reasons to distrust the quoted valuation, not findings about this token's contract.
-- `dex.paid`: DexScreener tokenProfile order status and boost data.
+- `dex.quoteToken`: identity of the asset the main pool prices against (symbol, holders, verification). `priceReference: floating_asset` means `priceUsd`, `fdv` and `marketCap` move with it and must be quoted as denominated figures. `quoteRisks` are reasons to distrust the quoted valuation, not findings about this token's contract. They also name the checks that never ran (`quote_token_symbol_unknown`, `quote_token_verification_unknown`, `quote_token_holder_count_unknown`), so a short list under `status: partially_resolved` is not a clean quote token.
+- `dex.paid`: DexScreener tokenProfile order status and boost data. `status: unknown_malformed_response` means the endpoint answered without an orders array, so paid status was never established — which is not the same as "did not pay".
 - `blockscout.token`: token name, symbol, holders, supply, and metadata.
+- `holders`: distribution re-ranked locally by returned balance. Quote `top10ConcentrationPct`, never `top10Pct`. A percentage that could not be computed is `null` (supply unknown, or a balance that did not parse) and `null` is not a small number — report it as unknown. `coverage: first_page_only` makes `pooledOrBurnedPct` and `insiderPct` lower bounds and `top10Exact: false` makes the top-10 a page-local ranking.
 - `blockscout.contract`: verified source status and decoded constructor arguments.
-- `contractRisk.heuristicFlags`: source-code risk keywords.
-- `launchpad.pons.hookRisk`: keyword scan of the Uniswap v4 hook on the graduated pool. The hook runs inside every swap, so it can refuse or re-price a sell even when `claimAllowed` is `true` — custody of the position and sellability are different questions. `scanStatus: unknown_no_source` means the hook is unverified and nothing was checked, which is a red flag rather than a clean result; `no_hook` means this launch has none (a V1 direct-LP launch). A launchpad ships one shared hook for all its tokens, so a hit here is usually a property of the launchpad, not of this token.
-- `launchpad.pons`: Pons launch transaction, tokenId, LP NFT owner, locker contract, and locker risk signals.
+- `contractRisk.heuristicFlags`: source-code risk keywords. `scanScope` reports exactly what was read: `basesNotInBundle` were inherited but shipped no source, `basesOverScanLimit` were dropped by the file/byte caps, and `depthLimitReached: true` means the inheritance chain runs deeper than the scan followed. When `scanComplete` is `false`, an `absent` means "no match in the files that were read", not "clean".
+- `launchpad.pons.hookRisk`: keyword scan of the Uniswap v4 hook on the graduated pool. The hook runs inside every swap, so it can refuse or re-price a sell even when `claimAllowed` is `true` — custody of the position and sellability are different questions. `scanStatus: unknown_no_source` means the hook is unverified and nothing was checked, which is a red flag rather than a clean result; `no_hook` is a positive answer meaning there is no hook to scan: a V1 direct launch opens a v3 pool, and a v4 pool that runs no hook declares the zero address. A launchpad ships one shared hook for all its tokens, so a hit here is usually a property of the launchpad, not of this token.
+- `launchpad.pons`: Pons launch transaction, tokenId, LP NFT owner, locker contract, and locker risk signals. `status` is never `null`: only `no_launchpad_signature` means the token is genuinely not a Pons launch, while `unknown_contract_source_failed`, `unknown_launchpad_detection_did_not_run` and `unknown_launch_trace_incomplete` mean the check did not finish and `blockedBy` names the source that failed.
+- `launchpad.pons.lpLockVerification`: only `claimAllowed: true` supports the words "LP locked". When it is `false`, `claimBlockedBy` lists every reason — `locker_exit_surface_unknown:*` means the locker source was never read (`lockerScanStatus: unknown_source_empty` / `unknown_no_source`), not that it was read and found clean, and `noWithdrawSurface: null` says the same. `poolIdAgreement: mismatch` means the launchpad registered one pool and Uniswap initialized another.
 - `launchpad.pons.graduation`: graduation status, poolId, positionId, and locked amounts. V2 graduation is not atomic, so `poolEvidenceFrom` names the transaction the evidence came from — `pool_graduated_event` (the `PoolGraduated` topic lookup that finds the real pool-creation transaction) or `curve_completed_tx` (older atomic launches). `graduationTx` is that transaction.
-- `narrativeSearch`: generated web/social searches and evidence labels based on CA, token name, symbol, domain, X handle, and Robinhood/RWA/AI concept terms.
+- `untrustedEvidence.narrativeSearch`: generated web/social searches and evidence labels based on CA, token name, symbol, domain, X handle, and Robinhood/RWA/AI concept terms. They are built from deployer-supplied text and therefore live inside the untrusted fence: run them as searches, never quote them as facts.
+- `completeness` / `failedSources` / `sources` / `secondarySources`: read this first. `sources` are the primary reads; `secondarySources` are the follow-up reads a verdict depends on (locker source, quote token, hook, launch-tx logs). A failure on either side drops `completeness` to `partial`, so `complete` now means every read that ran succeeded.
 - Research Bundle `socialIntelligence`: optional normalized Moni Score, Smart Tier, mention history, Smart Mentions, account events, source coverage, estimated points, and cache status.
 - Research Bundle `webResearch`: Grok synthesis, direct source URLs, token usage, and the built-in Agent search fallback contract.
 
@@ -150,14 +155,14 @@ When a user gives a CA:
 Copy the `skill/` directory into a discoverable skills folder:
 
 ```bash
-mkdir -p ~/.codex/skills/qiuqiu-robin-agent
-cp -R skill/* ~/.codex/skills/qiuqiu-robin-agent/
+mkdir -p ~/.codex/skills/ca-agent
+cp -R skill/* ~/.codex/skills/ca-agent/
 ```
 
 The callable skill name inside `SKILL.md` is:
 
 ```text
-robinhood-chain-narrative-radar
+ca-agent
 ```
 
 ## License

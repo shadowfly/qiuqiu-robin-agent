@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This repository packages the Robinhood Chain Narrative Radar skill. The primary instructions live in `skill/SKILL.md`; keep workflows aligned with implementation changes. Provider and domain modules stay under `skill/scripts/lib/onchain/`, `lib/moni/`, and `lib/search/`; CLIs in `skill/scripts/` remain thin. Supporting policy belongs in `skill/references/`, fixtures and tests in `skill/tests/`, and examples in `case-studies/`. Maintain all three READMEs when behavior changes.
+This repository packages the CA-agent skill. The primary instructions live in `skill/SKILL.md`; keep workflows aligned with implementation changes. Provider and domain modules stay under `skill/scripts/lib/onchain/`, `lib/moni/`, and `lib/search/`; CLIs in `skill/scripts/` remain thin. Supporting policy belongs in `skill/references/`, fixtures and tests in `skill/tests/`, and examples in `case-studies/`. Maintain all three READMEs when behavior changes.
 
 ## Build, Test, and Development Commands
 
@@ -10,10 +10,10 @@ There is no build step or third-party dependency installation. Use the system No
 
 ```bash
 node --check skill/scripts/robinhood_ca_probe.mjs
-bash -n skill/scripts/run_robinhood_chain_narrative_radar.sh
+bash -n skill/scripts/run_ca_agent.sh
 node --test skill/tests/*.test.mjs
 node skill/scripts/robinhood_ca_probe.mjs <40-hex-character-CA>
-bash skill/scripts/run_robinhood_chain_narrative_radar.sh quick <CA>
+bash skill/scripts/run_ca_agent.sh quick <CA>
 ```
 
 The first three commands perform offline checks. The latter commands are live smoke tests and require access to DexScreener and Robinhood Chain Blockscout; inspect `completeness`, `failedSources`, and the process exit code rather than assuming missing data is success.

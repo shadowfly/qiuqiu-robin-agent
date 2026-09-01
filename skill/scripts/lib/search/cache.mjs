@@ -10,7 +10,7 @@ function filename(key) {
 }
 
 export function createSearchCache({
-  directory = resolve(tmpdir(), "qiuqiu-robin-agent-search-cache"),
+  directory = resolve(tmpdir(), "ca-agent-search-cache"),
   ttlMs = Number(process.env.GROK_SEARCH_CACHE_TTL_MS) || DEFAULT_TTL_MS,
   enabled = process.env.GROK_SEARCH_CACHE !== "0",
   now = () => Date.now(),
