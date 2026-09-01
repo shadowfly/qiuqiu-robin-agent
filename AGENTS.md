@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This repository packages the CA-agent skill. The primary instructions live in `skill/SKILL.md`; keep workflows aligned with implementation changes. Provider and domain modules stay under `skill/scripts/lib/onchain/`, `lib/moni/`, and `lib/search/`; CLIs in `skill/scripts/` remain thin. Supporting policy belongs in `skill/references/`, fixtures and tests in `skill/tests/`, and examples in `case-studies/`. Maintain all three READMEs when behavior changes.
+This repository packages the ca-agent skill. The primary instructions live in `skill/SKILL.md`; keep workflows aligned with implementation changes. Provider and domain modules stay under `skill/scripts/lib/onchain/`, `lib/moni/`, and `lib/search/`; CLIs in `skill/scripts/` remain thin. Supporting policy belongs in `skill/references/`, fixtures and tests in `skill/tests/`, and examples in `case-studies/`. Maintain all three READMEs when behavior changes.
 
 ## Build, Test, and Development Commands
 

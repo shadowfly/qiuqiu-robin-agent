@@ -7,15 +7,15 @@ description: |
   real, fake, honeypot-like, paid-promoted, or worth watching. Supports CA-first quick screening, web/social narrative
   research by token name/concept, optional Moni Discover social-intelligence enrichment, multi-dimensional scoring, and
   objective project-summary templates.
-  Chinese display name: CA-agent（Robinhood Chain CA 快筛）.
+  Chinese display name: ca-agent（Robinhood Chain CA 快筛）.
 metadata:
   author: local
   version: "1.0.0"
 ---
 
-# CA-agent
+# ca-agent
 
-CA-agent 用于 CA-first 快速判断：先查 Dex 是否付费和市场结构，再查 Blockscout 合约/LP/holders，再查官网/X/社媒和叙事来源，最后给出 watch / avoid。它不是交易执行 skill，不把热度当安全。
+ca-agent 用于 CA-first 快速判断：先查 Dex 是否付费和市场结构，再查 Blockscout 合约/LP/holders，再查官网/X/社媒和叙事来源，最后给出 watch / avoid。它不是交易执行 skill，不把热度当安全。
 
 Use this skill for:
 - Robinhood Chain token CA 初判、叙事判断、项目证据分析

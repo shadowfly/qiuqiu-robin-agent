@@ -1,6 +1,6 @@
-# CA-agent
+# ca-agent
 
-CA-agent 是一个面向 Robinhood Chain 的 CA 快筛与叙事判断 skill。它的目标很简单：当你给一个 Robinhood Chain 代币 CA 时，agent 能快速查 Dex、查社媒、查合约、查 LP、查 launchpad，再给出一个尽量客观的判断。
+ca-agent 是一个面向 Robinhood Chain 的 CA 快筛与叙事判断 skill。它的目标很简单：当你给一个 Robinhood Chain 代币 CA 时，agent 能快速查 Dex、查社媒、查合约、查 LP、查 launchpad，再给出一个尽量客观的判断。
 
 它不是交易机器人，不负责自动买卖，也不会把“热度高”“Dex 资料付费了”当成项目可信。
 

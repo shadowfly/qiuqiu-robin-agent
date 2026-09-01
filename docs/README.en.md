@@ -1,6 +1,6 @@
-# CA-agent
+# ca-agent
 
-CA-agent is a CA-first research skill for Robinhood Chain tokens. It helps an AI agent quickly inspect a token contract address, collect market and social evidence, check DexScreener paid profile status, review Blockscout contract data, identify launchpad and LP-lock evidence, and classify the token's Robinhood Chain narrative.
+ca-agent is a CA-first research skill for Robinhood Chain tokens. It helps an AI agent quickly inspect a token contract address, collect market and social evidence, check DexScreener paid profile status, review Blockscout contract data, identify launchpad and LP-lock evidence, and classify the token's Robinhood Chain narrative.
 
 It is designed for fast due diligence, not trading execution.
 

@@ -28,7 +28,7 @@ fi
 
 cat <<EOF
 
-CA-agent — Robinhood Chain CA screening (${MODE})
+ca-agent — Robinhood Chain CA screening (${MODE})
 
 Token CA:
 ${CA}

@@ -1,4 +1,4 @@
-# 🏹 CA-agent
+# 🏹 ca-agent
 
 > Robinhood Chain 农民的 CA 快筛 Skill：先查 Dex，再查合约，再查 LP，再查社媒，最后才谈叙事。
 
@@ -8,7 +8,7 @@
 
 ## 🌱 这是干什么的？
 
-CA-agent 是一个面向 **Robinhood Chain** 的 CA 快筛与叙事判断工具。
+ca-agent 是一个面向 **Robinhood Chain** 的 CA 快筛与叙事判断工具。
 
 你给它一个 token CA，它会帮你做第一轮脏活：
 
