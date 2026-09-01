@@ -55,6 +55,7 @@ test("builds an end-to-end bundle through injected adapters", async () => {
   const result = await buildResearchBundle({
     ca: chainResult.ca,
     mode: "quick",
+    includeMoni: true,
     client,
     chainProbeRunner: async () => ({ result: chainResult, exitCode: 0, stderr: "" }),
   });
@@ -100,6 +101,7 @@ test("deep bundles use Grok search by default", async () => {
   const result = await buildResearchBundle({
     ca: chainResult.ca,
     mode: "deep",
+    includeMoni: true,
     client,
     searchClient,
     chainProbeRunner: async () => ({ result: chainResult, exitCode: 0, stderr: "" }),
@@ -108,4 +110,47 @@ test("deep bundles use Grok search by default", async () => {
   assert.equal(result.output.coverage.web, "complete");
   assert.equal(result.output.webResearch.coverage.model, "grok-chat-fast");
   assert.equal(result.output.webResearch.fallback.required, false);
+});
+
+test("does not spend Moni points unless enrichment is requested", async () => {
+  const client = {
+    request: async () => {
+      throw new Error("Moni must not be queried without an explicit opt-in");
+    },
+  };
+
+  for (const mode of ["quick", "deep"]) {
+    const result = await buildResearchBundle({
+      ca: chainResult.ca,
+      mode,
+      client,
+      searchClient: { model: "grok-chat-fast", search: async () => ({ ok: false, attempts: 1, latencyMs: 1, error: "off" }) },
+      chainProbeRunner: async () => ({ result: chainResult, exitCode: 0, stderr: "" }),
+    });
+
+    assert.equal(result.output.coverage.social, "skipped_not_requested");
+    assert.equal(result.output.socialIntelligence.account, null);
+    assert.equal(result.output.socialIntelligence.provenance.estimatedPointsBillable, 0);
+    // The handle is still resolved for free, so the operator can see what --moni would look up.
+    assert.equal(result.output.identityResolution.selectedXHandle, "first_handle");
+    assert.equal(result.output.socialIntelligence.subject.xHandle, "first_handle");
+  }
+});
+
+test("keeps the chain probe unchanged when Moni is skipped", async () => {
+  const result = await buildResearchBundle({
+    ca: chainResult.ca,
+    mode: "quick",
+    includeMoni: false,
+    client: {
+      request: async () => {
+        throw new Error("Moni must not be queried when explicitly disabled");
+      },
+    },
+    chainProbeRunner: async () => ({ result: chainResult, exitCode: 0, stderr: "" }),
+  });
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.output.coverage.onchain, "complete");
+  assert.equal(result.output.coverage.social, "skipped_not_requested");
 });
