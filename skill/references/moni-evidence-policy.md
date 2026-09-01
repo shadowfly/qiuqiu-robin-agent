@@ -22,6 +22,7 @@ An explicit `--x` argument changes the lookup target, not its verification statu
 
 ## Modes and Cost
 
+- Moni costs points on every uncached call, so the research bundle never runs it implicitly. `robinhood_research_bundle.mjs` queries Moni only with `--moni`; otherwise it reports `coverage.status=skipped_not_requested`. Read that as not queried, never as zero social traction, and never spend points without the user asking for social evidence.
 - `quick`: Full Account Info only; estimated 8 points before cache.
 - `deep`: Full Account Info, mention history, smart-mention history, smart-mention feed, and account events; estimated 21 points before cache.
 - Global `projects`, `events`, and `smart-mentions` feeds are billed per returned item and stay separate from per-CA enrichment.

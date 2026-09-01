@@ -249,3 +249,135 @@ test("Pons analyzer marks a direct-LP launch as having no hook to scan", async (
   assert.equal(output.hookRisk.scanStatus, "no_hook");
   assert.equal(output.hookRisk.address, null);
 });
+
+// A locker that reports is_verified without shipping source used to satisfy every exit
+// check by returning false from all of them, which is how an unread contract produced a
+// positive lock claim.
+test("Pons analyzer refuses to claim a lock from a locker it never read", async () => {
+  const output = await runGraduation({
+    ...graduationBlockscout({ topicRows: [{ transactionHash: POOL_TX }], addressLogs: async () => ({ ok: true, data: { items: [] } }) }),
+    contract: async () => ({ ok: true, data: { name: "V2LaunchLocker", is_verified: true, source_code: "", decoded_constructor_args: [] } }),
+  });
+
+  assert.equal(output.lockerRisk.scanStatus, "unknown_source_empty");
+  assert.equal(output.lockerRisk.hasWithdrawOrUnlock, null);
+  assert.equal(output.lockerRisk.exitSurfaces, null);
+  assert.equal(output.lpLockVerification.noWithdrawSurface, null);
+  assert.equal(output.lpLockVerification.claimAllowed, false);
+  assert.equal(output.lpLockVerification.poolMatch, "main_pool_lock_verified");
+  assert.deepEqual(output.lpLockVerification.claimBlockedBy, ["locker_exit_surface_unknown:unknown_source_empty"]);
+});
+
+test("Pons analyzer follows the locker's base contracts for exit surfaces", async () => {
+  const output = await runGraduation({
+    ...graduationBlockscout({ topicRows: [{ transactionHash: POOL_TX }], addressLogs: async () => ({ ok: true, data: { items: [] } }) }),
+    contract: async () => ({
+      ok: true,
+      data: {
+        name: "V2LaunchLocker",
+        is_verified: true,
+        file_path: "Locker.sol",
+        source_code: "contract V2LaunchLocker is Rescuable { /* permanent custody */ }",
+        // The leaf looks clean; the way out is one level up the inheritance chain.
+        additional_sources: [{ file_path: "Rescuable.sol", source_code: "contract Rescuable { function rescue(address to) external onlyOwner {} }" }],
+        decoded_constructor_args: [],
+      },
+    }),
+  });
+
+  assert.deepEqual(output.lockerRisk.scanScope.scannedFiles, ["Locker.sol", "Rescuable.sol"]);
+  assert.deepEqual(output.lockerRisk.exitSurfaces, ["exit_function"]);
+  assert.equal(output.lpLockVerification.claimAllowed, false);
+  assert.deepEqual(output.lpLockVerification.claimBlockedBy, ["locker_exposes_an_exit_surface"]);
+});
+
+test("Pons analyzer reports an unfinished launch trace instead of no launchpad", async () => {
+  const sanitizer = createSanitizer();
+  const output = await createPonsAnalyzer({
+    blockscout: {
+      transactionLogs: async () => ({ ok: false, errorKind: "timeout" }),
+      addressTransactions: async () => ({ ok: false, errorKind: "rate_limited" }),
+    },
+    sanitizeText: sanitizer.sanitizeText,
+  }).probe(
+    CA,
+    { decoded_constructor_args: [[DEPLOYER, { name: "deployer_" }]] },
+    { creator_address_hash: FACTORY, creation_transaction_hash: "0xlaunch" },
+    null
+  );
+
+  assert.equal(output.status, "unknown_launch_trace_incomplete");
+  assert.equal(output.foundLaunchTx, false);
+  assert.deepEqual(output.blockedBy, ["creation_tx_logs_source_failed", "deployer_transaction_source_failed"]);
+  assert.equal(output.launchTrace.pagesScanned, 0);
+  assert.match(output.note, /UNKNOWN/);
+});
+
+test("Pons analyzer separates a completed empty scan from a blocked one", async () => {
+  const sanitizer = createSanitizer();
+  const output = await createPonsAnalyzer({
+    blockscout: {
+      transactionLogs: async () => ({ ok: true, data: { items: [] } }),
+      addressTransactions: async () => ({ ok: true, data: { items: [] } }),
+    },
+    sanitizeText: sanitizer.sanitizeText,
+  }).probe(
+    CA,
+    { decoded_constructor_args: [[DEPLOYER, { name: "deployer_" }]] },
+    { creator_address_hash: FACTORY, creation_transaction_hash: "0xlaunch" },
+    null
+  );
+
+  assert.equal(output.status, "no_launch_tx_found");
+  assert.deepEqual(output.blockedBy, []);
+  assert.equal(output.launchTrace.pagesScanned, 1);
+});
+
+const ZERO = "0x0000000000000000000000000000000000000000";
+
+test("Pons analyzer treats a zero-address hook as no hook, not an unread one", async () => {
+  const zeroHookLogs = poolLogs.map((log) =>
+    log.decoded.method_call.startsWith("Initialize")
+      ? event("Initialize", { id: POOL_ID, currency0: QUOTE, currency1: CA, hooks: ZERO })
+      : log
+  );
+  const output = await runGraduation({
+    ...graduationBlockscout({ topicRows: [{ transactionHash: POOL_TX }], addressLogs: async () => ({ ok: true, data: { items: [] } }) }),
+    transactionLogs: async (hash) => ({ ok: true, data: { items: hash === POOL_TX ? zeroHookLogs : curveLaunchLogs } }),
+    contract: async (address) => {
+      assert.notEqual(String(address).toLowerCase(), ZERO, "the zero address must never be looked up as a contract");
+      return { ok: true, data: { name: "V2LaunchLocker", is_verified: true, source_code: "contract V2LaunchLocker {}", decoded_constructor_args: [] } };
+    },
+    stats: async () => ({ ok: true, data: { total_blocks: 200 } }),
+  });
+
+  assert.equal(output.hookRisk.scanStatus, "no_hook");
+  assert.equal(output.hookRisk.address, ZERO);
+});
+
+test("Pons analyzer refuses a hook read from a different pool's Initialize", async () => {
+  const OTHER_POOL = "0xaaa909ac1600a59685928cf317fb953d518d405b4748371889e3cb2932adf4c2";
+  const mismatchedLogs = poolLogs.map((log) =>
+    log.decoded.method_call.startsWith("Initialize")
+      ? event("Initialize", { id: OTHER_POOL, currency0: QUOTE, currency1: CA, hooks: HOOKS })
+      : log
+  );
+  const output = await runGraduation({
+    ...graduationBlockscout({ topicRows: [{ transactionHash: POOL_TX }], addressLogs: async () => ({ ok: true, data: { items: [] } }) }),
+    transactionLogs: async (hash) => ({ ok: true, data: { items: hash === POOL_TX ? mismatchedLogs : curveLaunchLogs } }),
+  });
+
+  assert.equal(output.graduation.poolIdAgreement, "mismatch");
+  // The launchpad registered one pool and Uniswap initialized another, so this hook is
+  // not evidence about the pool the position was locked in.
+  assert.equal(output.graduation.hooks, null);
+  // Dropping the hook must not read as "this pool runs no hook": a v4 pool always has a
+  // hook slot, so the answer here is that the swap path was never inspected.
+  assert.equal(output.hookRisk.scanStatus, "unknown_hook_address");
+  assert.equal(output.hookRisk.addressUnknownReason, "pool_id_mismatch_hook_belongs_to_another_pool");
+  assert.equal(output.lpLockVerification.poolIdAgreement, "mismatch");
+  // Which pool the position sits in is contradicted by the launchpad's own events, so
+  // no lock claim may be made off the half of the contradiction that happens to match.
+  assert.equal(output.lpLockVerification.claimAllowed, false);
+  assert.ok(output.lpLockVerification.claimBlockedBy.includes("pool_id_mismatch_between_launchpad_and_uniswap"));
+});

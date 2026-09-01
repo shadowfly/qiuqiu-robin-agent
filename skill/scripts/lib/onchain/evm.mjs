@@ -38,3 +38,10 @@ export function sameId(left, right) {
     return false;
   }
 }
+
+// The zero address is a real answer, not a missing one: a Uniswap v4 pool declares it
+// when the pool runs no hook. Treating it as an address to look up turns "there is no
+// hook" into "the hook could not be read".
+export function isZeroAddress(value) {
+  return /^0x0{40}$/.test(String(value || ""));
+}

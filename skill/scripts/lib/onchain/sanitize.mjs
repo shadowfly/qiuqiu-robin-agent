@@ -40,14 +40,32 @@ export function createSanitizer() {
     }
   }
 
+  // Keys are attacker-controlled too: a decoded struct field, a counter name or a
+  // DexScreener boost key is a string the deployer or the API chose. Sanitizing only the
+  // values leaves an unchecked channel that reaches the agent verbatim.
   function sanitizeDecoded(value, field, depth = 0) {
     if (depth > 6) return null;
     if (typeof value === "string") return sanitizeText(value, field, 300);
     if (Array.isArray(value)) return value.map((item, index) => sanitizeDecoded(item, `${field}[${index}]`, depth + 1));
     if (value && typeof value === "object") {
-      return Object.fromEntries(
-        Object.entries(value).map(([key, item]) => [key, sanitizeDecoded(item, `${field}.${key}`, depth + 1)])
-      );
+      // Two raw keys can sanitize down to the same string -- "risk" and "ri\u200Bsk"
+      // differ only by a character this sanitizer strips. Building the object in one
+      // pass would let the later entry silently overwrite the earlier one, which is a
+      // way to make a "present" finding disappear behind a clean-looking duplicate.
+      // Both values are kept, the collision is suffixed so the shadowing is visible,
+      // and it is recorded as a note because a deployer does not collide keys by
+      // accident.
+      const output = {};
+      const seen = new Map();
+      for (const [key, item] of Object.entries(value)) {
+        const safeKey = sanitizeText(key, `${field}.<key>`, 64) || "unnamed_key";
+        const collisions = (seen.get(safeKey) || 0) + 1;
+        seen.set(safeKey, collisions);
+        if (collisions > 1) notes.push({ field: `${field}.<key>`, flags: ["key_collision_after_sanitizing"], key: safeKey });
+        const finalKey = collisions > 1 ? `${safeKey}#${collisions}` : safeKey;
+        output[finalKey] = sanitizeDecoded(item, `${field}.${key}`, depth + 1);
+      }
+      return output;
     }
     return value;
   }

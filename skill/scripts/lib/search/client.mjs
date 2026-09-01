@@ -94,7 +94,7 @@ export function createGrokSearchClient({
             authorization: "Bearer " + apiKey,
             "content-type": "application/json",
             accept: "application/json",
-            "user-agent": "qiuqiu-robin-agent/grok-search-adapter",
+            "user-agent": "ca-agent/grok-search-adapter",
           },
           body: JSON.stringify(body),
           signal: AbortSignal.timeout(timeoutMs),

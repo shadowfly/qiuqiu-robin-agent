@@ -1,4 +1,6 @@
-const SOURCE_SCAN_LIMITS = { files: 12, bytes: 400000, matchesPerCheck: 3 };
+import { isZeroAddress } from "./evm.mjs";
+
+const SOURCE_SCAN_LIMITS = { files: 12, bytes: 400000, matchesPerCheck: 3, inheritanceDepth: 3 };
 
 const RISK_CHECKS = [
   [
@@ -38,6 +40,20 @@ export function stripSolidityComments(source = "") {
     .replace(/\/\/[^\n]*/g, (match) => " ".repeat(match.length));
 }
 
+// Every base contract name declared by one source file. A control can live in a base
+// the token merely inherits, so the scan follows them -- and, just as importantly,
+// reports the ones it could not follow instead of scanning a subset in silence.
+function declaredBases(code) {
+  const bases = [];
+  for (const match of String(code).matchAll(/\b(?:abstract\s+)?contract\s+\w+\s+is\s+([^{;]+)\{/g)) {
+    for (const raw of match[1].split(",")) {
+      const base = raw.trim().split(/[\s(]/)[0];
+      if (base) bases.push(base);
+    }
+  }
+  return bases;
+}
+
 export function resolveScanScope(contractData) {
   const main = String(contractData?.source_code || "");
   const additional = Array.isArray(contractData?.additional_sources) ? contractData.additional_sources : [];
@@ -46,6 +62,10 @@ export function resolveScanScope(contractData) {
     files: [],
     inherits: [],
     unresolvedBases: [],
+    basesNotInBundle: [],
+    basesOverScanLimit: [],
+    depthLimitReached: false,
+    scanComplete: false,
     additionalSourcesCount: additional.length,
     additionalSourcesBytes: additionalBytes,
     scannedBytes: 0,
@@ -60,43 +80,60 @@ export function resolveScanScope(contractData) {
 
   const files = [{ path: baseName(contractData?.file_path || "") || "(main)", code: main }];
   const inherits = [];
-  const unresolved = [];
+  const notInBundle = [];
+  const overLimit = [];
   const seen = new Set();
   let bytes = main.length;
   let frontier = [main];
+  let depthLimitReached = false;
 
-  for (let depth = 0; depth < 3 && frontier.length; depth += 1) {
+  for (let depth = 0; depth < SOURCE_SCAN_LIMITS.inheritanceDepth && frontier.length; depth += 1) {
     const next = [];
     for (const code of frontier) {
-      for (const match of code.matchAll(/\b(?:abstract\s+)?contract\s+\w+\s+is\s+([^{;]+)\{/g)) {
-        for (const raw of match[1].split(",")) {
-          const base = raw.trim().split(/[\s(]/)[0];
-          if (!base || seen.has(base)) continue;
-          seen.add(base);
-          inherits.push(base);
-          const file = byContractName.get(base);
-          if (!file) {
-            unresolved.push(base);
-            continue;
-          }
-          const source = String(file.source_code || "");
-          if (files.length >= SOURCE_SCAN_LIMITS.files || bytes + source.length > SOURCE_SCAN_LIMITS.bytes) {
-            unresolved.push(base);
-            continue;
-          }
-          files.push({ path: baseName(file.file_path || base), code: source });
-          bytes += source.length;
-          next.push(source);
+      for (const base of declaredBases(code)) {
+        if (seen.has(base)) continue;
+        seen.add(base);
+        inherits.push(base);
+        const file = byContractName.get(base);
+        if (!file) {
+          notInBundle.push(base);
+          continue;
         }
+        const source = String(file.source_code || "");
+        if (files.length >= SOURCE_SCAN_LIMITS.files || bytes + source.length > SOURCE_SCAN_LIMITS.bytes) {
+          overLimit.push(base);
+          continue;
+        }
+        files.push({ path: baseName(file.file_path || base), code: source });
+        bytes += source.length;
+        next.push(source);
       }
     }
     frontier = next;
   }
 
+  // Sources pulled in on the last permitted level were scanned, but their own bases were
+  // never enumerated. Reporting them as unresolved is the difference between a bounded
+  // scan and a scan that quietly stopped looking.
+  for (const code of frontier) {
+    for (const base of declaredBases(code)) {
+      if (seen.has(base)) continue;
+      seen.add(base);
+      inherits.push(base);
+      overLimit.push(base);
+      depthLimitReached = true;
+    }
+  }
+
+  const unresolved = [...notInBundle, ...overLimit];
   return {
     files,
     inherits,
     unresolvedBases: unresolved,
+    basesNotInBundle: notInBundle,
+    basesOverScanLimit: overLimit,
+    depthLimitReached,
+    scanComplete: unresolved.length === 0,
     additionalSourcesCount: additional.length,
     additionalSourcesBytes: additionalBytes,
     scannedBytes: bytes,
@@ -173,12 +210,29 @@ const HOOK_RISK_CHECKS = [
   check("arbitrary_call"),
 ].filter(Boolean);
 
-export function buildHookRisk(hookAddress, contractData, sanitizeText) {
-  if (!hookAddress) {
+export function buildHookRisk(hookAddress, contractData, sanitizeText, addressUnknownReason = null) {
+  // A missing hook address means one of two opposite things, and the caller is the only
+  // one that can tell them apart: the pool announced it runs no hook, or this probe
+  // never got to read which hook it runs. Reporting the second as no_hook would answer
+  // "is the swap path clear" with a positive finding nobody established.
+  if (addressUnknownReason) {
     return {
       address: null,
+      scanStatus: "unknown_hook_address",
+      addressUnknownReason,
+      note:
+        "Which hook runs on this pool was never established, so nothing about the swap path was checked. This is a check that did not run, not a pool without a hook: every Uniswap v4 pool carries a hook slot, and a hook can refuse or tax a sell no matter how clean the token contract and the LP lock look. Do not pair this with any claim about sellability.",
+    };
+  }
+  // The zero address is the v4 way of declaring "this pool runs no hook". Looking it up
+  // fails, and a failed lookup reads as unknown_no_source -- an unchecked hook -- which
+  // is the opposite of what the pool actually said.
+  if (!hookAddress || isZeroAddress(hookAddress)) {
+    return {
+      address: isZeroAddress(hookAddress) ? hookAddress : null,
       scanStatus: "no_hook",
-      note: "No hook was recorded for this pool. A Uniswap v3 pool has no hooks, and a v4 pool may use the zero address.",
+      note:
+        "No hook runs on this pool. A Uniswap v3 pool has no hooks, and a v4 pool declares the zero address when it uses none. This is a positive answer, not a check that failed to run.",
     };
   }
   const source = contractData?.source_code || "";
@@ -189,7 +243,13 @@ export function buildHookRisk(hookAddress, contractData, sanitizeText) {
     isVerified: contractData ? Boolean(contractData.is_verified) : null,
     sourceAvailable: Boolean(source),
     scanStatus: source ? "scanned" : "unknown_no_source",
-    scanScope: { scannedFiles: scope.files.map((file) => file.path), scannedBytes: scope.scannedBytes, unresolvedBases: scope.unresolvedBases },
+    scanScope: {
+      scannedFiles: scope.files.map((file) => file.path),
+      scannedBytes: scope.scannedBytes,
+      unresolvedBases: scope.unresolvedBases,
+      depthLimitReached: scope.depthLimitReached,
+      scanComplete: scope.scanComplete,
+    },
     keywordHits: keywordHits(scope, sanitizeText, HOOK_RISK_CHECKS),
     note:
       "The hook sits in the swap path of the pool people trade against, so it can block or tax a sell even when the token contract is clean and the LP is permanently locked. scanStatus=unknown_no_source means the hook is unverified and nothing here was checked: that is a red flag on its own, not a clean result. A launchpad ships one shared hook for every token it launches, so a finding here is usually a property of the launchpad rather than of this token -- say which one you mean.",
@@ -207,14 +267,21 @@ export function buildContractRisk(contractData, sanitizeText) {
       scannedBytes: scope.scannedBytes,
       inherits: scope.inherits,
       unresolvedBases: scope.unresolvedBases,
+      basesNotInBundle: scope.basesNotInBundle,
+      basesOverScanLimit: scope.basesOverScanLimit,
+      depthLimitReached: scope.depthLimitReached,
+      scanComplete: scope.scanComplete,
       additionalSourcesCount: scope.additionalSourcesCount,
       additionalSourcesBytes: scope.additionalSourcesBytes,
       note:
-        "The scan covers the token contract plus the base contracts it declares, resolved from additional_sources. It deliberately does not cover the rest of the verification bundle: a launchpad ships its factory, curve and hook sources alongside the token, and scanning those would report the launchpad's admin controls as if they were the token's. Anything in unresolvedBases was inherited but not found or not scanned, so a control living there would be missed.",
+        "The scan covers the token contract plus the base contracts it declares, resolved from additional_sources. It deliberately does not cover the rest of the verification bundle: a launchpad ships its factory, curve and hook sources alongside the token, and scanning those would report the launchpad's admin controls as if they were the token's. scanComplete=false means part of the inheritance chain was never read, so an 'absent' below is bounded, not clean: basesNotInBundle were inherited but shipped no source, basesOverScanLimit were dropped by the file/byte caps, and depthLimitReached=true means the chain runs deeper than " +
+        SOURCE_SCAN_LIMITS.inheritanceDepth +
+        " levels and the remainder was never enumerated.",
     },
     keywordHits: keywordHits(scope, sanitizeText),
+    scanComplete: Boolean(source) && scope.scanComplete,
     flagLegend:
-      "status: present = pattern matched | absent = scanned, no match | unknown = source never retrieved. matches carry file and line for spot-checking; moreMatches means the list was capped. contextAvailable=false means the pattern matched across line breaks, so no single line is quoted.",
+      "status: present = pattern matched | absent = scanned, no match, within scanScope only | unknown = source never retrieved. matches carry file and line for spot-checking; moreMatches means the list was capped. contextAvailable=false means the pattern matched across line breaks, so no single line is quoted.",
     note:
       "Heuristic keyword scan, not an audit. 'unknown' means the check did not run: never report it as 'no backdoor found'. A 'present' is a pointer to read, not a verdict -- read the quoted line and the surrounding function before making a safety claim, and check launchpad.pons.restrictionWindow before treating a sell_limit hit as active.",
   };

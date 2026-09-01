@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildContractRisk } from "../scripts/lib/onchain/contract-risk.mjs";
-import { aggregatePairs, createDexAnalyzer } from "../scripts/lib/onchain/dexscreener.mjs";
+import { buildContractRisk, buildHookRisk } from "../scripts/lib/onchain/contract-risk.mjs";
+import { CROSS_CHAIN_PAIRS_SHOWN, aggregatePairs, createDexAnalyzer, summarizeOrders } from "../scripts/lib/onchain/dexscreener.mjs";
 import { createSanitizer } from "../scripts/lib/onchain/sanitize.mjs";
 
 const CA = "0x1111111111111111111111111111111111111111";
@@ -66,4 +66,76 @@ test("contract risk scans inherited sources and ignores comments", () => {
   assert.equal(risk.keywordHits.mint.status, "absent");
   assert.equal(risk.keywordHits.owner_admin.status, "present");
   assert.equal(risk.keywordHits.pause.status, "present");
+});
+
+test("contract risk reports an inheritance chain it stopped short of", () => {
+  const sanitizer = createSanitizer();
+  const chain = (name, base) => ({ file_path: `${name}.sol`, source_code: `contract ${name} is ${base} {}` });
+  const risk = buildContractRisk(
+    {
+      file_path: "Token.sol",
+      source_code: "contract Token is A {}",
+      additional_sources: [chain("A", "B"), chain("B", "C"), chain("C", "D"), { file_path: "D.sol", source_code: "contract D { function mint(address a) public {} }" }],
+    },
+    sanitizer.sanitizeText
+  );
+
+  // D holds the mint, and D is past the depth cap. The scan must say so rather than
+  // reporting mint as absent.
+  assert.equal(risk.keywordHits.mint.status, "absent");
+  assert.equal(risk.scanComplete, false);
+  assert.equal(risk.scanScope.depthLimitReached, true);
+  assert.deepEqual(risk.scanScope.inherits, ["A", "B", "C", "D"]);
+  assert.deepEqual(risk.scanScope.unresolvedBases, ["D"]);
+});
+
+test("contract risk names the bases that shipped no source", () => {
+  const sanitizer = createSanitizer();
+  const risk = buildContractRisk(
+    { file_path: "Token.sol", source_code: "contract Token is Ownable, Pausable {}", additional_sources: [] },
+    sanitizer.sanitizeText
+  );
+
+  assert.deepEqual(risk.scanScope.basesNotInBundle, ["Ownable", "Pausable"]);
+  assert.equal(risk.scanScope.depthLimitReached, false);
+  assert.equal(risk.scanComplete, false);
+});
+
+test("a pool that declares no hook is a positive answer, not an unread one", () => {
+  const sanitizer = createSanitizer();
+  const none = buildHookRisk("0x0000000000000000000000000000000000000000", null, sanitizer.sanitizeText);
+  assert.equal(none.scanStatus, "no_hook");
+  assert.equal(none.address, "0x0000000000000000000000000000000000000000");
+
+  const unread = buildHookRisk("0x5555555555555555555555555555555555555555", { is_verified: false }, sanitizer.sanitizeText);
+  assert.equal(unread.scanStatus, "unknown_no_source");
+});
+
+test("Dex analyzer caps the cross-chain list and says it capped it", () => {
+  const sanitizer = createSanitizer();
+  const analyzer = createDexAnalyzer(sanitizer);
+  const pairs = Array.from({ length: CROSS_CHAIN_PAIRS_SHOWN + 3 }, (unused, index) => ({
+    chainId: `chain${index}`,
+    baseToken: { address: CA },
+    quoteToken: { address: "0x3333333333333333333333333333333333333333" },
+  }));
+  const result = analyzer.screenPairs(pairs, CA);
+
+  assert.equal(result.crossChainPairs.length, CROSS_CHAIN_PAIRS_SHOWN);
+  assert.equal(result.crossChainPairsTotal, CROSS_CHAIN_PAIRS_SHOWN + 3);
+  assert.equal(result.crossChainPairsTruncated, true);
+  assert.equal(result.screening, "no_base_side_pair");
+});
+
+test("a paid-orders response without an orders array is unknown, not unpaid", () => {
+  const sanitizer = createSanitizer();
+  const malformed = summarizeOrders({ boosts: ["x"] }, sanitizer);
+  assert.equal(malformed.status, "unknown_malformed_response");
+  assert.equal(malformed.tokenProfileApproved, null);
+  assert.equal(malformed.orders, null);
+  assert.match(malformed.note, /Unknown is not/);
+
+  const empty = summarizeOrders({ orders: [] }, sanitizer);
+  assert.equal(empty.status, "ok");
+  assert.equal(empty.tokenProfileApproved, false);
 });

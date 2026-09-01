@@ -30,11 +30,14 @@ export function selectXSubject(chainResult, explicitHandle = null) {
 
 export function selectSearchQueries(chainResult, mode = "quick") {
   const limit = mode === "deep" ? 12 : 6;
-  return [
-    ...new Set(
-      (chainResult?.narrativeSearch?.queries || []).map((query) => sanitizeSearchQuery(query)).filter(Boolean)
-    ),
-  ].slice(0, limit);
+  // The queries live under untrustedEvidence because they are built from
+  // deployer-written name, symbol and links. The top-level key is now a pointer
+  // string, so read the fenced location first and only fall back to the old
+  // shape for a chain result produced by an earlier probe.
+  const fenced = chainResult?.untrustedEvidence?.narrativeSearch?.queries;
+  const legacy = chainResult?.narrativeSearch?.queries;
+  const queries = Array.isArray(fenced) ? fenced : Array.isArray(legacy) ? legacy : [];
+  return [...new Set(queries.map((query) => sanitizeSearchQuery(query)).filter(Boolean))].slice(0, limit);
 }
 
 export function assembleResearchBundle({
@@ -107,6 +110,7 @@ export async function buildResearchBundle({
   mode = "quick",
   timeframe = "D30",
   explicitHandle,
+  includeMoni,
   client,
   searchClient,
   includeWebSearch,
@@ -122,8 +126,17 @@ export async function buildResearchBundle({
   const chainProbe = await chainProbeRunner(ca);
   const identity = selectXSubject(chainProbe.result, explicitHandle);
   const searchQueries = selectSearchQueries(chainProbe.result, mode);
+  // Moni spends metered Discover points on every uncached call, so enrichment is
+  // opt-in: an unrequested bundle must cost nothing beyond the free chain probe.
+  const shouldEnrichSocial = includeMoni ?? false;
   let socialIntelligence;
-  if (!identity.handle) {
+  if (!shouldEnrichSocial) {
+    socialIntelligence = unavailableMoniEvidence(
+      identity.handle,
+      "skipped_not_requested",
+      "Moni enrichment is opt-in because it spends Discover points (estimated 8 for quick, 21 for deep). Pass --moni to run it. Skipped is not zero social traction."
+    );
+  } else if (!identity.handle) {
     socialIntelligence = unavailableMoniEvidence(
       null,
       "skipped_no_x_handle",
@@ -182,6 +195,7 @@ function parseArguments(argv) {
   const positional = [];
   let explicitHandle = null;
   let timeframe = "D30";
+  let includeMoni = null;
   let includeWebSearch = null;
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
@@ -195,6 +209,10 @@ function parseArguments(argv) {
       index += 1;
     } else if (value.startsWith("--timeframe=")) {
       timeframe = value.slice(12);
+    } else if (value === "--moni") {
+      includeMoni = true;
+    } else if (value === "--no-moni") {
+      includeMoni = false;
     } else if (value === "--search") {
       includeWebSearch = true;
     } else if (value === "--no-search") {
@@ -203,7 +221,7 @@ function parseArguments(argv) {
       positional.push(value);
     }
   }
-  return { ca: positional[0], mode: positional[1] || "quick", explicitHandle, timeframe, includeWebSearch };
+  return { ca: positional[0], mode: positional[1] || "quick", explicitHandle, timeframe, includeMoni, includeWebSearch };
 }
 
 async function main() {
@@ -215,7 +233,7 @@ async function main() {
     (args.explicitHandle !== null && !sanitizeXHandle(args.explicitHandle))
   ) {
     console.error(
-      "Usage: robinhood_research_bundle.mjs <CA> [quick|deep] [--x <handle>] [--timeframe D30] [--search|--no-search]"
+      "Usage: robinhood_research_bundle.mjs <CA> [quick|deep] [--x <handle>] [--timeframe D30] [--moni|--no-moni] [--search|--no-search]"
     );
     process.exit(2);
   }

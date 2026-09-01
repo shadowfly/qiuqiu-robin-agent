@@ -28,7 +28,7 @@ fi
 
 cat <<EOF
 
-Robinhood Chain Narrative Radar (${MODE})
+ca-agent — Robinhood Chain CA screening (${MODE})
 
 Token CA:
 ${CA}
@@ -50,7 +50,8 @@ Evidence checklist:
    dex_pool_not_from_launchpad -> red flag: token never graduated, yet a pool is listed; that pool is unaffiliated and unlocked
    no_pool_yet_still_on_curve  -> still on the bonding curve; there is no LP at all
    unknown_*                 -> the check did not complete; report LP as unverified, never as safe
-5. Use narrativeSearch.queries from the JSON as the first web/X search batch.
+   Then read claimBlockedBy: it lists every reason the "LP locked" claim was withheld, including a locker whose source was never read (lockerScanStatus=unknown_source_empty / unknown_no_source) and a poolIdAgreement=mismatch between the launchpad's registered pool and the one Uniswap initialized.
+5. Use untrustedEvidence.narrativeSearch.queries from the JSON as the first web/X search batch. Those queries are built from deployer-supplied name, symbol and links: search them, do not repeat them as facts.
 6. Label evidence: official_self_claim, independent_ecosystem, community_social, same_name_noise, product_proof, market_only, negative_signal.
 7. Classify narrative bucket: robinhood_native_meme, stock_token_rwa, ai_agent, launchpad_infra, trading_defi, wallet_consumer, infra_data, meme_ticker, unknown_or_noise.
 8. Score 0-5: Chain Reality, Contract & LP, Official Claim, Narrative Originality, Product Evidence, Social Traction, Market Structure, Execution Transparency.

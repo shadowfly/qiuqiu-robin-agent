@@ -34,13 +34,24 @@ export function createQuoteTokenAnalyzer({ blockscout, sanitizeText }) {
 
     const token = tokenResult.data || {};
     const symbol = sanitizeText(token.symbol, "quoteToken.symbol", 32);
-    const holdersCount = Number(token.holders_count);
+    // Number(null) and Number("") are 0, and 0 < THIN_QUOTE_HOLDERS, so coercing a
+    // field the source left empty would report a concrete "thinly held" finding about a
+    // holder count nobody ever returned. A missing count stays unknown.
+    const rawHoldersCount = token.holders_count;
+    const holdersCount =
+      typeof rawHoldersCount === "number" || (typeof rawHoldersCount === "string" && rawHoldersCount.trim() !== "")
+        ? Number(rawHoldersCount)
+        : NaN;
     const isStablecoin = symbol ? STABLE_SYMBOLS.has(symbol.toUpperCase()) : null;
     const isVerified = contractResult.ok ? Boolean(contractResult.data?.is_verified) : null;
 
     return {
       address,
-      status: "resolved",
+      // The token row was read; whether its identity was actually established is a
+      // separate question, and partially_resolved is how that shows up next to the
+      // priceReference derived from it.
+      status: symbol && contractResult.ok ? "resolved" : "partially_resolved",
+      contractLookup: contractResult.ok ? "ok" : contractResult.errorKind || contractResult.status || "error",
       symbol,
       name: sanitizeText(token.name, "quoteToken.name", 120),
       holdersCount: Number.isFinite(holdersCount) ? holdersCount : null,
@@ -51,13 +62,22 @@ export function createQuoteTokenAnalyzer({ blockscout, sanitizeText }) {
       // token's USD price is a derived number that moves with an asset the project does
       // not control, and fdv/marketCap inherit that movement.
       priceReference: isStablecoin === null ? "unknown" : isStablecoin ? "stablecoin" : "floating_asset",
+      // A check that did not run is a reason to distrust the valuation in its own right.
+      // Listing only the checks that came back negative would let a failed lookup produce
+      // an empty risk list, which reads as a clean quote side.
       quoteRisks: [
         ...(isStablecoin === false ? ["price_denominated_in_floating_asset"] : []),
+        ...(isStablecoin === null ? ["quote_token_symbol_unknown"] : []),
         ...(isVerified === false ? ["quote_token_source_unverified"] : []),
-        ...(Number.isFinite(holdersCount) && holdersCount < THIN_QUOTE_HOLDERS ? ["quote_token_thinly_held"] : []),
+        ...(isVerified === null ? ["quote_token_verification_unknown"] : []),
+        ...(Number.isFinite(holdersCount)
+          ? holdersCount < THIN_QUOTE_HOLDERS
+            ? ["quote_token_thinly_held"]
+            : []
+          : ["quote_token_holder_count_unknown"]),
       ],
       note:
-        "priceUsd, fdv and marketCap for the base token are quoted through this asset. priceReference=floating_asset means those USD figures move with it and are not a claim about the base token alone. quoteRisks entries are reasons to distrust the quoted valuation, not findings about the base token's own contract.",
+        "priceUsd, fdv and marketCap for the base token are quoted through this asset. priceReference=floating_asset means those USD figures move with it and are not a claim about the base token alone. priceReference=unknown means the quote side was never identified, which is not the same as a stable one. quoteRisks entries are reasons to distrust the quoted valuation, not findings about the base token's own contract; the *_unknown entries are checks that did not run, and an empty list means every check ran and came back clean.",
     };
   }
 

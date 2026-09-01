@@ -77,7 +77,7 @@ export function createMoniClient({
           headers: {
             "Api-Key": apiKey,
             accept: "application/json",
-            "user-agent": "qiuqiu-robin-agent/moni-adapter",
+            "user-agent": "ca-agent/moni-adapter",
           },
           signal: AbortSignal.timeout(timeoutMs),
         });

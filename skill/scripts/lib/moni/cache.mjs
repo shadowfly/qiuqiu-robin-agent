@@ -10,7 +10,7 @@ function cacheFilename(key) {
 }
 
 export function createMoniCache({
-  directory = process.env.MONI_CACHE_DIR || resolve(tmpdir(), "qiuqiu-robin-agent-moni-cache"),
+  directory = process.env.MONI_CACHE_DIR || resolve(tmpdir(), "ca-agent-moni-cache"),
   ttlMs = Number(process.env.MONI_CACHE_TTL_MS) || DEFAULT_TTL_MS,
   enabled = process.env.MONI_CACHE !== "0",
   now = () => Date.now(),

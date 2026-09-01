@@ -47,48 +47,99 @@ export function summarizeHolders(result, totalSupply, infrastructure, sanitizeTe
         "Holder distribution was never retrieved. This is a check that did not run, not a clean result: do not describe concentration as acceptable.",
     };
   }
+  // An ok response without an items array is a broken answer, not an empty one. Reading
+  // it as "no holders" would report a token with unknown distribution as having none.
+  if (!Array.isArray(result.data?.items)) {
+    return {
+      status: "unknown_malformed_response",
+      note:
+        "The holders source answered without a holder list, so distribution was never established. Treat concentration as unknown, not as clean.",
+    };
+  }
   let supply = null;
   try {
     supply = BigInt(String(totalSupply ?? "").trim() || "0");
   } catch {
     supply = null;
   }
+  const supplyKnown = Boolean(supply && supply > 0n);
   const percentage = (value) => {
-    if (!supply || supply <= 0n) return null;
+    if (!supplyKnown) return null;
     try {
       return Number((BigInt(String(value)) * 1000000n) / supply) / 10000;
     } catch {
       return null;
     }
   };
-  const rows = (result.data?.items || []).map((item) => {
+  const balanceOf = (value) => {
+    try {
+      return BigInt(String(value ?? "0").trim() || "0");
+    } catch {
+      return null;
+    }
+  };
+  const rows = result.data.items.map((item) => {
     const address = item?.address?.hash || null;
     const known = infrastructure.get(String(address || "").toLowerCase()) || null;
     return {
       address,
       pct: percentage(item?.value),
+      balance: balanceOf(item?.value),
       role: known ? HOLDER_ROLES[known] || "known" : "unlabelled",
       label: known || sanitizeText(item?.address?.name, "holders.label", 60) || null,
       isContract: Boolean(item?.address?.is_contract),
     };
   });
+  const morePages = Boolean(result.data?.next_page_params);
+  const unknownBalances = rows.filter((row) => row.balance === null).length;
+  // Do not inherit the source's ordering. "Top 10" is a claim about rank, so rank it here
+  // from the balances actually returned; rows whose balance did not parse sort last and
+  // are reported rather than silently ranked as zero.
+  const ranked = rows
+    .slice()
+    .sort((left, right) => {
+      if (left.balance === null || right.balance === null) return left.balance === right.balance ? 0 : left.balance === null ? 1 : -1;
+      return left.balance === right.balance ? 0 : left.balance > right.balance ? -1 : 1;
+    })
+    .map(({ balance, ...row }) => row);
   const parked = (row) => row.role === "liquidity" || row.role === "burn";
-  const sum = (list) => round2(list.reduce((number, row) => number + (Number(row.pct) || 0), 0));
-  const concentrating = rows.filter((row) => !parked(row));
-  const top10 = rows.slice(0, 10);
+  // A percentage that could not be computed stays unknown all the way up: folding it into
+  // a total as zero would turn "supply unknown" into a reassuring small number.
+  const sum = (list) => {
+    if (!supplyKnown) return null;
+    if (list.some((row) => row.pct === null)) return null;
+    return round2(list.reduce((number, row) => number + row.pct, 0));
+  };
+  // A rank-derived total is a claim about *which* rows are the largest, so it needs a
+  // complete ordering, not just parseable percentages. A balance that did not parse has
+  // no place in an ordering, and a further page can hold a bigger holder than anything
+  // on this one -- neither is a reason to publish a smaller number.
+  const rankingComplete = unknownBalances === 0 && !morePages;
+  const rankSum = (list) => (rankingComplete ? sum(list) : null);
+  const concentrating = ranked.filter((row) => !parked(row));
+  const top10 = ranked.slice(0, 10);
   const top10Concentrating = concentrating.slice(0, 10);
+  const unknownPct = ranked.filter((row) => row.pct === null).length;
   return {
     status: "ok",
-    supplyKnown: Boolean(supply && supply > 0n),
-    holdersReturned: rows.length,
-    pooledOrBurnedPct: sum(rows.filter(parked)),
-    insiderPct: sum(rows.filter((row) => row.role === "insider")),
-    top10Pct: sum(top10),
-    top10ConcentrationPct: sum(top10Concentrating),
+    supplyKnown,
+    holdersReturned: ranked.length,
+    morePages,
+    coverage: morePages ? "first_page_only" : "all_holders_returned",
+    percentagesKnown: supplyKnown && unknownPct === 0,
+    unknownPercentageHolders: unknownPct,
+    unknownBalanceHolders: unknownBalances,
+    rankingComplete,
+    top10Exact: rankingComplete,
+    top10ConcentratingExact: rankingComplete,
+    pooledOrBurnedPct: sum(ranked.filter(parked)),
+    insiderPct: sum(ranked.filter((row) => row.role === "insider")),
+    top10Pct: rankSum(top10),
+    top10ConcentrationPct: rankSum(top10Concentrating),
     top10,
     top10Concentrating,
     note:
-      "Percentages are share of total supply, from the top holders page (one page, sorted descending, so the top 10 is exact whenever holdersReturned is at least 10). Quote top10ConcentrationPct, not top10Pct: on a launchpad token the pool manager, bonding curve, locker and burn address hold most of the supply by design and are not whales. The deployer and fee wallet are insiders and stay in the count. Unlabelled contract holders may still be infrastructure this probe does not know about: check before calling one a whale.",
+      "Percentages are share of total supply. null means it could not be computed -- supplyKnown=false, or a balance that did not parse -- and null is never a small number: do not read it as low concentration. Rows are ranked here by returned balance rather than trusting the source's ordering. rankingComplete=false means that ordering could not be established -- unknownBalanceHolders rows did not parse, or coverage=first_page_only left holders unread -- and the rank-derived totals top10Pct and top10ConcentrationPct are then null rather than a partial sum presented as the top of the book. coverage=first_page_only also makes pooledOrBurnedPct and insiderPct lower bounds, and a *Exact=false makes the matching top-10 list a page-local ranking that may omit larger holders. Quote top10ConcentrationPct, not top10Pct: on a launchpad token the pool manager, bonding curve, locker and burn address hold most of the supply by design and are not whales. The deployer and fee wallet are insiders and stay in the count. Unlabelled contract holders may still be infrastructure this probe does not know about: check before calling one a whale.",
   };
 }
 
@@ -97,7 +148,15 @@ export function createOnchainLiquidityProbe({ blockscout, sanitizeText }) {
     if (!isAddress(address)) return null;
     const result = await blockscout.tokenBalances(address);
     if (!result.ok) return { address, role, status: "unknown_source_failed", error: result.error || result.status };
-    const items = Array.isArray(result.data) ? result.data : result.data?.items || [];
+    const items = Array.isArray(result.data) ? result.data : result.data?.items;
+    if (!Array.isArray(items)) {
+      return {
+        address,
+        role,
+        status: "unknown_malformed_response",
+        note: "The balances source answered without a balance list, so nothing was read. Absent is not empty.",
+      };
+    }
     const normalizedCa = String(ca || "").toLowerCase();
     const normalizedQuote = String(quoteToken || "").toLowerCase();
     const rows = items.map((balance) => {
@@ -123,6 +182,8 @@ export function createOnchainLiquidityProbe({ blockscout, sanitizeText }) {
       role,
       status: "ok",
       balancesReturned: rows.length,
+      balancesShown: Math.min(rows.length, 8),
+      balancesTruncated: rows.length > 8,
       balances: rows.slice(0, 8),
       note:
         "Raw balances held by this address: not a price, and not exit liquidity. Only queried_token and quote_asset belong to this market. Entries marked unrelated were sent here by somebody else -- pool and curve addresses collect airdrop spam -- and must never be read as liquidity. On a bonding curve the quote balance is the current reserve, not what a holder could actually exit into.",
