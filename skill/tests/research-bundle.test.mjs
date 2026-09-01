@@ -1,12 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { assembleResearchBundle, buildResearchBundle, selectXSubject } from "../scripts/robinhood_research_bundle.mjs";
+import { assembleResearchBundle, buildResearchBundle, selectSearchQueries, selectXSubject } from "../scripts/robinhood_research_bundle.mjs";
 
 const chainResult = {
   ca: "0x1111111111111111111111111111111111111111",
   completeness: "complete",
-  narrativeSearch: { queries: ['"0x1111111111111111111111111111111111111111"', '"first_handle" Robinhood Chain'] },
+  narrativeSearch: "moved to untrustedEvidence.narrativeSearch",
   untrustedEvidence: {
+    narrativeSearch: { queries: ['"0x1111111111111111111111111111111111111111"', '"first_handle" Robinhood Chain'] },
     socials: [
       { type: "twitter", xHandle: "first_handle" },
       { type: "twitter", xHandle: "second_handle" },
@@ -153,4 +154,19 @@ test("keeps the chain probe unchanged when Moni is skipped", async () => {
   assert.equal(result.exitCode, 0);
   assert.equal(result.output.coverage.onchain, "complete");
   assert.equal(result.output.coverage.social, "skipped_not_requested");
+});
+
+// The probe moved narrativeSearch inside the untrusted fence. A consumer still
+// reading the top level finds a pointer string, produces no queries, and the
+// search layer silently reports skipped_no_queries for every token.
+test("search queries are read from inside the untrusted fence", () => {
+  assert.deepEqual(selectSearchQueries(chainResult), [
+    '"0x1111111111111111111111111111111111111111"',
+    '"first_handle" Robinhood Chain',
+  ]);
+
+  const legacy = { narrativeSearch: { queries: ['"legacy" Robinhood Chain'] } };
+  assert.deepEqual(selectSearchQueries(legacy), ['"legacy" Robinhood Chain']);
+
+  assert.deepEqual(selectSearchQueries({ narrativeSearch: "moved to untrustedEvidence.narrativeSearch" }), []);
 });

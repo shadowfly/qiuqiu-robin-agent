@@ -30,11 +30,14 @@ export function selectXSubject(chainResult, explicitHandle = null) {
 
 export function selectSearchQueries(chainResult, mode = "quick") {
   const limit = mode === "deep" ? 12 : 6;
-  return [
-    ...new Set(
-      (chainResult?.narrativeSearch?.queries || []).map((query) => sanitizeSearchQuery(query)).filter(Boolean)
-    ),
-  ].slice(0, limit);
+  // The queries live under untrustedEvidence because they are built from
+  // deployer-written name, symbol and links. The top-level key is now a pointer
+  // string, so read the fenced location first and only fall back to the old
+  // shape for a chain result produced by an earlier probe.
+  const fenced = chainResult?.untrustedEvidence?.narrativeSearch?.queries;
+  const legacy = chainResult?.narrativeSearch?.queries;
+  const queries = Array.isArray(fenced) ? fenced : Array.isArray(legacy) ? legacy : [];
+  return [...new Set(queries.map((query) => sanitizeSearchQuery(query)).filter(Boolean))].slice(0, limit);
 }
 
 export function assembleResearchBundle({
